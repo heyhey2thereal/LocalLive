@@ -227,3 +227,19 @@ export const IconCode = ({ size = 16, className }: P) => (
     <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
   </svg>
 )
+
+export const IconMusic = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+  </svg>
+)
+
+export const IconTransition = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <rect x="2" y="6" width="9" height="12" rx="1.5" />
+    <rect x="13" y="6" width="9" height="12" rx="1.5" />
+    <path d="M9 12h6" />
+  </svg>
+)

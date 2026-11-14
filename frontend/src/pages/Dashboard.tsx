@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, type BroadcastStatus, type Playlist } from '../api'
+import { usePoll } from '../lib/usePoll'
 import { useToast } from '../components/ui'
 import {
   IconCpu,
@@ -23,20 +24,18 @@ function MetricBar({ percent }: { percent: number }) {
 
 export default function Dashboard() {
   const { push } = useToast()
-  const [status, setStatus] = useState<BroadcastStatus | null>(null)
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selected, setSelected] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
-  const timer = useRef<number | null>(null)
 
-  const loadStatus = useCallback(async () => {
-    try {
-      const s = await api.get<BroadcastStatus>('/api/broadcast/status')
-      setStatus(s)
-    } catch {
-      /* transient */
-    }
-  }, [])
+  // Poll the full status: it carries the engine state, the system metrics and
+  // the fallback playlist name that the panel below displays. usePoll keeps the
+  // requests from overlapping and pauses while the tab is hidden.
+  const poll = usePoll<BroadcastStatus>(
+    (signal) => api.get<BroadcastStatus>('/api/broadcast/status', signal),
+    2000,
+  )
+  const status = poll.data
 
   const loadPlaylists = useCallback(async () => {
     try {
@@ -49,20 +48,15 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    void loadStatus()
     void loadPlaylists()
-    timer.current = window.setInterval(loadStatus, 2000)
-    return () => {
-      if (timer.current) window.clearInterval(timer.current)
-    }
-  }, [loadStatus, loadPlaylists])
+  }, [loadPlaylists])
 
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
     setBusy(true)
     try {
       await fn()
       push({ kind: 'ok', title: okMsg })
-      await loadStatus()
+      poll.refresh()
     } catch (err: any) {
       push({ kind: 'err', title: 'Action impossible', message: err?.message ?? '' })
     } finally {
@@ -187,7 +181,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-head">
             <span className="card-title">Commandes de diffusion</span>
-            <button className="btn btn-ghost btn-icon" onClick={loadStatus} title="Rafraîchir">
+            <button className="btn btn-ghost btn-icon" onClick={poll.refresh} title="Rafraîchir">
               <IconRefresh size={16} />
             </button>
           </div>

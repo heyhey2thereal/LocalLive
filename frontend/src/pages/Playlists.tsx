@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Media, type Playlist, type PlaylistItem, type Scene } from '../api'
+import { api, type Catalog, type Media, type Playlist, type PlaylistItem, type Scene } from '../api'
 import {
   ConfirmDialog,
   EmptyState,
@@ -9,7 +9,7 @@ import {
   Modal,
   useToast,
 } from '../components/ui'
-import { IconGrip, IconPlaylist, IconPlus, IconTrash } from '../components/icons'
+import { IconGrip, IconMusic, IconPlay, IconPlaylist, IconPlus, IconTransition, IconTrash } from '../components/icons'
 
 export default function Playlists() {
   const { push } = useToast()
@@ -24,14 +24,22 @@ export default function Playlists() {
   const [toDelete, setToDelete] = useState<Playlist | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
+  const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [audioMedia, setAudioMedia] = useState<Media[]>([])
+  const [settingsItem, setSettingsItem] = useState<PlaylistItem | null>(null)
+  const [preview, setPreview] = useState<PlaylistItem | null>(null)
 
   const selected = playlists.find((p) => p.id === selectedId) ?? null
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.get<{ items: Playlist[] }>('/api/playlists')
+      const [data, cat] = await Promise.all([
+        api.get<{ items: Playlist[] }>('/api/playlists'),
+        api.get<Catalog>('/api/meta/catalog').catch(() => null),
+      ])
       setPlaylists(data.items)
+      setCatalog(cat)
       setSelectedId((prev) => prev ?? data.items[0]?.id ?? null)
     } catch (err: any) {
       push({ kind: 'err', title: 'Chargement impossible', message: err?.message })
@@ -120,6 +128,38 @@ export default function Playlists() {
     try {
       await api.patch(`/api/playlists/${selected.id}/items/${item.id}`, { duration })
       await load()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Modification impossible', message: err?.message })
+    }
+  }
+
+  const openSettings = async (item: PlaylistItem) => {
+    setSettingsItem(item)
+    if (audioMedia.length === 0) {
+      try {
+        const data = await api.get<{ items: Media[] }>('/api/media?kind=audio')
+        setAudioMedia(data.items)
+      } catch {
+        const data = await api.get<{ items: Media[] }>('/api/media').catch(() => ({ items: [] }))
+        setAudioMedia(data.items.filter((m) => m.kind === 'audio'))
+      }
+    }
+  }
+
+  const saveItemSettings = async (patch: Partial<PlaylistItem>) => {
+    if (!selected || !settingsItem) return
+    try {
+      await api.patch(`/api/playlists/${selected.id}/items/${settingsItem.id}`, {
+        duration: settingsItem.duration || settingsItem.effective_duration,
+        transition: patch.transition ?? settingsItem.transition,
+        transition_duration: patch.transition_duration ?? settingsItem.transition_duration,
+        background_audio_id:
+          patch.background_audio_id !== undefined ? patch.background_audio_id : settingsItem.background_audio_id,
+        background_volume: patch.background_volume ?? settingsItem.background_volume,
+      })
+      setSettingsItem(null)
+      await load()
+      push({ kind: 'ok', title: 'Réglages enregistrés' })
     } catch (err: any) {
       push({ kind: 'err', title: 'Modification impossible', message: err?.message })
     }
@@ -276,6 +316,12 @@ export default function Playlists() {
                         onBlur={(e) => setItemDuration(item, Number(e.target.value))}
                         title="Durée (secondes)"
                       />
+                      <button className="btn btn-ghost btn-icon" title="Transition et musique" onClick={() => openSettings(item)}>
+                        <IconTransition size={15} />
+                      </button>
+                      <button className="btn btn-ghost btn-icon" title="Aperçu" onClick={() => setPreview(item)}>
+                        <IconPlay size={15} />
+                      </button>
                       <button className="btn btn-ghost btn-icon" onClick={() => removeItem(item)}>
                         <IconTrash size={15} />
                       </button>
@@ -368,6 +414,36 @@ export default function Playlists() {
         </Modal>
       )}
 
+      {settingsItem && (
+        <ItemSettingsModal
+          item={settingsItem}
+          transitions={catalog?.transitions ?? []}
+          audio={audioMedia}
+          onClose={() => setSettingsItem(null)}
+          onSave={saveItemSettings}
+        />
+      )}
+
+      {preview && (
+        <Modal title={`Aperçu : ${preview.title}`} onClose={() => setPreview(null)} wide>
+          <div className="stage">
+            {preview.kind === 'image' ? (
+              <img src={preview.thumbnail_url ?? ''} alt="" />
+            ) : preview.media_id ? (
+              <video src={`/api/media/${preview.media_id}/stream`} controls autoPlay />
+            ) : (
+              <div className="stage-empty">
+                <IconPlay size={30} />
+                <span>Scène — aperçu disponible en direct</span>
+              </div>
+            )}
+          </div>
+          <div className="text-sm muted-2 mt-8">
+            {preview.kind ?? 'scène'} · {formatDuration(preview.effective_duration)}
+          </div>
+        </Modal>
+      )}
+
       {toDelete && (
         <ConfirmDialog
           title="Supprimer la playlist"
@@ -377,5 +453,107 @@ export default function Playlists() {
         />
       )}
     </>
+  )
+}
+
+function ItemSettingsModal({
+  item,
+  transitions,
+  audio,
+  onClose,
+  onSave,
+}: {
+  item: PlaylistItem
+  transitions: { id: string; label: string; default_duration?: number }[]
+  audio: Media[]
+  onClose: () => void
+  onSave: (patch: Partial<PlaylistItem>) => void
+}) {
+  const [transition, setTransition] = useState(item.transition || 'cut')
+  const [duration, setDuration] = useState(item.transition_duration || 0)
+  const [audioId, setAudioId] = useState<number | ''>(item.background_audio_id ?? '')
+  const [volume, setVolume] = useState(item.background_volume ?? 0.15)
+
+  return (
+    <Modal
+      title={`Transition et musique : ${item.title}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Annuler
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() =>
+              onSave({
+                transition,
+                transition_duration: duration,
+                background_audio_id: audioId === '' ? null : Number(audioId),
+                background_volume: volume,
+              })
+            }
+          >
+            Enregistrer
+          </button>
+        </>
+      }
+    >
+      <div className="grid grid-2">
+        <div className="field">
+          <label>Transition d'entrée</label>
+          <select className="select" value={transition} onChange={(e) => setTransition(e.target.value)}>
+            {transitions.map((tr) => (
+              <option key={tr.id} value={tr.id}>
+                {tr.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label>Durée de la transition (s)</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            step={0.1}
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label>
+          <IconMusic size={14} /> Musique de fond
+        </label>
+        <select
+          className="select"
+          value={audioId}
+          onChange={(e) => setAudioId(e.target.value ? Number(e.target.value) : '')}
+        >
+          <option value="">— Aucune —</option>
+          {audio.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.title}
+            </option>
+          ))}
+        </select>
+        <span className="hint">Piste audio mixée sous l'élément (boucle automatique via la durée).</span>
+      </div>
+
+      <div className="field">
+        <label>Volume de la musique ({Math.round(volume * 100)} %)</label>
+        <input
+          className="input"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={volume}
+          onChange={(e) => setVolume(Number(e.target.value))}
+        />
+      </div>
+    </Modal>
   )
 }
