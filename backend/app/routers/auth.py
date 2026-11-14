@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
-from ..deps import admin_user, current_user
+from ..deps import current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -88,7 +88,7 @@ def me(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 @router.post("/password")
 def change_password(
-    payload: PasswordPayload, user: dict = Depends(admin_user)
+    payload: PasswordPayload, user: dict = Depends(current_user)
 ) -> dict[str, Any]:
     row = db.query_one("SELECT password_hash FROM users WHERE id = ?", (user["id"],))
     if not row or not security.verify_password(payload.current_password, row["password_hash"]):
@@ -98,6 +98,6 @@ def change_password(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user["id"]))
-    # Invalidate other sessions for safety.
+    # Invalidate all sessions for this user; the caller must log in again.
     db.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
     return {"ok": True}

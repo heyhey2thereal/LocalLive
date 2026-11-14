@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from .. import db, fx
-from ..deps import admin_user, current_user, require_installed
+from ..deps import current_user, require, require_installed
+from .. import permissions
 
 router = APIRouter(prefix="/api/playlists", tags=["playlists"])
 
@@ -100,7 +101,7 @@ def list_playlists(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_playlist(payload: PlaylistPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def create_playlist(payload: PlaylistPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))) -> dict[str, Any]:
     pid = db.execute(
         "INSERT INTO playlists(name, description, loop) VALUES(?,?,?)",
         (payload.name.strip(), (payload.description or "").strip() or None, 1 if payload.loop else 0),
@@ -118,7 +119,7 @@ def get_playlist(playlist_id: int, user: dict = Depends(current_user)) -> dict[s
 
 @router.patch("/{playlist_id}")
 def update_playlist(
-    playlist_id: int, payload: PlaylistPayload, user: dict = Depends(admin_user)
+    playlist_id: int, payload: PlaylistPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))
 ) -> dict[str, Any]:
     row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
     if not row:
@@ -136,7 +137,7 @@ def update_playlist(
 
 
 @router.delete("/{playlist_id}")
-def delete_playlist(playlist_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_playlist(playlist_id: int, user: dict = Depends(require(permissions.CAP_PLAYLISTS))) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
     db.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
@@ -145,7 +146,7 @@ def delete_playlist(playlist_id: int, user: dict = Depends(admin_user)) -> dict[
 
 @router.post("/{playlist_id}/items", status_code=201)
 def add_item(
-    playlist_id: int, payload: ItemPayload, user: dict = Depends(admin_user)
+    playlist_id: int, payload: ItemPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))
 ) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
@@ -182,7 +183,7 @@ def add_item(
 
 @router.patch("/{playlist_id}/items/{item_id}")
 def update_item(
-    playlist_id: int, item_id: int, payload: ItemPayload, user: dict = Depends(admin_user)
+    playlist_id: int, item_id: int, payload: ItemPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))
 ) -> dict[str, Any]:
     if not db.query_one(
         "SELECT id FROM playlist_items WHERE id = ? AND playlist_id = ?", (item_id, playlist_id)
@@ -212,7 +213,7 @@ def update_item(
 
 
 @router.delete("/{playlist_id}/items/{item_id}")
-def delete_item(playlist_id: int, item_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_item(playlist_id: int, item_id: int, user: dict = Depends(require(permissions.CAP_PLAYLISTS))) -> dict[str, Any]:
     if not db.query_one(
         "SELECT id FROM playlist_items WHERE id = ? AND playlist_id = ?", (item_id, playlist_id)
     ):
@@ -224,7 +225,7 @@ def delete_item(playlist_id: int, item_id: int, user: dict = Depends(admin_user)
 
 @router.post("/{playlist_id}/reorder")
 def reorder(
-    playlist_id: int, payload: ReorderPayload, user: dict = Depends(admin_user)
+    playlist_id: int, payload: ReorderPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))
 ) -> dict[str, Any]:
     existing = {
         r["id"]

@@ -142,6 +142,13 @@ _MIGRATIONS = [
             "background_volume": "REAL NOT NULL DEFAULT 0.15",
         },
     ),
+    (
+        "users",
+        {
+            "role": "TEXT NOT NULL DEFAULT 'admin'",  # admin | operator | viewer
+            "permissions": "TEXT NOT NULL DEFAULT '[]'",  # extra per-user grants (JSON)
+        },
+    ),
 ]
 
 

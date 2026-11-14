@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, db, monitor, probe
-from ..deps import admin_user, current_user
+from ..deps import current_user, require
+from .. import permissions
 from ..engine import get_engine
 from ..routers.schedules import active_playlist_id
 from ..security import mask_secret
@@ -72,7 +73,7 @@ def status(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @router.post("/start")
-def start(payload: StartPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def start(payload: StartPayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     engine = get_engine()
     playlist_id = payload.playlist_id or active_playlist_id()
     if not playlist_id:
@@ -87,12 +88,12 @@ def start(payload: StartPayload, user: dict = Depends(admin_user)) -> dict[str, 
 
 
 @router.post("/stop")
-def stop(user: dict = Depends(admin_user)) -> dict[str, Any]:
+def stop(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     return get_engine().stop()
 
 
 @router.post("/switch/{playlist_id}")
-def switch(playlist_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def switch(playlist_id: int, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
     result = get_engine().switch_playlist(playlist_id)
@@ -115,7 +116,7 @@ def get_settings(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @router.put("/settings")
-def update_settings(payload: SettingsPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def update_settings(payload: SettingsPayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     updates = payload.model_dump(exclude_none=True)
     if "stream_preset" in updates and updates["stream_preset"] not in _preset_allowed():
         raise HTTPException(status_code=422, detail="Préréglage FFmpeg invalide")
@@ -168,7 +169,7 @@ def probe_rtmp(url: str, key: str) -> dict[str, Any]:
 
 
 @router.post("/test-rtmp")
-def test_rtmp(payload: RtmpTestPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def test_rtmp(payload: RtmpTestPayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     """Attempt a 2-second handshake with the configured RTMP endpoint."""
     url = payload.url if payload.url is not None else (db.get_setting("stream_rtmp_url", "") or "")
     key = payload.key if payload.key is not None else (db.get_setting("stream_key", "") or "")
@@ -263,7 +264,7 @@ class TakePayload(BaseModel):
 
 
 @router.post("/take")
-def take(payload: TakePayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def take(payload: TakePayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     """Take a playlist to air (preview -> program)."""
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
@@ -274,7 +275,7 @@ def take(payload: TakePayload, user: dict = Depends(admin_user)) -> dict[str, An
 
 
 @router.post("/recover")
-def recover(user: dict = Depends(admin_user)) -> dict[str, Any]:
+def recover(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     """Force a clean restart of the broadcast."""
     engine = get_engine()
     state = engine.status()

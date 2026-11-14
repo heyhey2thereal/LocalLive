@@ -164,7 +164,7 @@ def create_admin(payload: AdminPayload) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     user_id = db.execute(
-        "INSERT INTO users(username, password_hash, is_admin) VALUES(?, ?, 1)",
+        "INSERT INTO users(username, password_hash, is_admin, role) VALUES(?, ?, 1, 'admin')",
         (payload.username, pw_hash),
     )
     return {"ok": True, "user_id": user_id}

@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from .. import fx
+from .. import fx, permissions
 from ..deps import current_user
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
@@ -22,6 +22,8 @@ def catalog(user: dict = Depends(current_user)) -> dict[str, Any]:
         "transitions": fx.transitions_catalog(),
         "animations": fx.animations_catalog(),
         "visualizers": fx.visualizers_catalog(),
+        "roles": permissions.ROLES,
+        "capabilities": permissions.capabilities_catalog(),
         "layer_types": [
             {"id": "text", "label": "Texte"},
             {"id": "overlay", "label": "Bandeau"},

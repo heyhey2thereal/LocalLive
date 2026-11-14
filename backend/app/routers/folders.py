@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from .. import db
-from ..deps import admin_user, current_user
+from .. import db, permissions
+from ..deps import current_user, require
 
 router = APIRouter(prefix="/api/media/folders", tags=["folders"])
 
@@ -27,7 +27,7 @@ class FolderPayload(BaseModel):
 
 
 @router.post("", status_code=201)
-def create_folder(payload: FolderPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def create_folder(payload: FolderPayload, user: dict = Depends(require(permissions.CAP_MEDIA))) -> dict[str, Any]:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Nom requis")
@@ -36,6 +36,6 @@ def create_folder(payload: FolderPayload, user: dict = Depends(admin_user)) -> d
 
 
 @router.delete("/{folder_id}")
-def delete_folder(folder_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_folder(folder_id: int, user: dict = Depends(require(permissions.CAP_MEDIA))) -> dict[str, Any]:
     db.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
     return {"ok": True}

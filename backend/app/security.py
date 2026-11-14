@@ -79,7 +79,7 @@ def get_session_user(token: str | None):
     if not token:
         return None
     row = db.query_one(
-        "SELECT s.expires_at, u.id, u.username, u.is_admin, u.last_login "
+        "SELECT s.expires_at, u.id, u.username, u.is_admin, u.last_login, u.role, u.permissions "
         "FROM sessions s JOIN users u ON u.id = s.user_id "
         "WHERE s.token = ?",
         (_hash_token(token),),
@@ -95,10 +95,15 @@ def get_session_user(token: str | None):
     if expires < datetime.now(timezone.utc):
         delete_session(token)
         return None
+    from . import permissions
+
+    role = row["role"] or ("admin" if row["is_admin"] else "viewer")
     return {
         "id": row["id"],
         "username": row["username"],
         "is_admin": bool(row["is_admin"]),
+        "role": role,
+        "permissions": permissions.capabilities_for(role, row["permissions"]),
         "last_login": row["last_login"],
     }
 

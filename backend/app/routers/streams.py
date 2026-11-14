@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from .. import db
-from ..deps import admin_user, current_user, require_installed
+from ..deps import current_user, require, require_installed
+from .. import permissions
 from ..security import mask_secret
 
 router = APIRouter(prefix="/api/streams", tags=["streams"])
@@ -95,7 +96,7 @@ def list_streams(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_stream(payload: StreamPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def create_stream(payload: StreamPayload, user: dict = Depends(require(permissions.CAP_STREAMS))) -> dict[str, Any]:
     sid = db.execute(
         """INSERT INTO streams(name, description, tags, privacy, category, encoding, kind,
                                rtmp_url, stream_key, output_file, width, height, fps,
@@ -133,7 +134,7 @@ def get_stream(stream_id: int, user: dict = Depends(current_user)) -> dict[str, 
 
 @router.put("/{stream_id}")
 def update_stream(
-    stream_id: int, payload: StreamPayload, user: dict = Depends(admin_user)
+    stream_id: int, payload: StreamPayload, user: dict = Depends(require(permissions.CAP_STREAMS))
 ) -> dict[str, Any]:
     row = db.query_one("SELECT * FROM streams WHERE id = ?", (stream_id,))
     if not row:
@@ -175,7 +176,7 @@ def update_stream(
 
 
 @router.delete("/{stream_id}")
-def delete_stream(stream_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_stream(stream_id: int, user: dict = Depends(require(permissions.CAP_STREAMS))) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM streams WHERE id = ?", (stream_id,)):
         raise HTTPException(status_code=404, detail="Flux introuvable")
     db.execute("DELETE FROM streams WHERE id = ?", (stream_id,))
@@ -183,7 +184,7 @@ def delete_stream(stream_id: int, user: dict = Depends(admin_user)) -> dict[str,
 
 
 @router.post("/{stream_id}/test")
-def test_stream(stream_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def test_stream(stream_id: int, user: dict = Depends(require(permissions.CAP_STREAMS))) -> dict[str, Any]:
     """Attempt a short RTMP handshake with this stream's destination."""
     from ..routers.broadcast import probe_rtmp
 

@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .. import config, db, monitor, probe
-from ..deps import admin_user, current_user, require_installed
+from ..deps import current_user, require, require_installed
+from .. import permissions
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -123,7 +124,7 @@ async def upload(
     files: list[UploadFile] = File(...),
     folder_id: int | None = Form(None),
     category: str | None = Form(None),
-    user: dict = Depends(admin_user),
+    user: dict = Depends(require(permissions.CAP_MEDIA)),
 ) -> dict[str, Any]:
     require_installed()
     created: list[dict[str, Any]] = []
@@ -186,7 +187,7 @@ class MediaUpdate(BaseModel):
 
 @router.patch("/{media_id}")
 def update_media(
-    media_id: int, payload: MediaUpdate, user: dict = Depends(admin_user)
+    media_id: int, payload: MediaUpdate, user: dict = Depends(require(permissions.CAP_MEDIA))
 ) -> dict[str, Any]:
     row = db.query_one("SELECT * FROM media WHERE id = ?", (media_id,))
     if not row:
@@ -215,7 +216,7 @@ def update_media(
 
 
 @router.delete("/{media_id}")
-def delete_media(media_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_media(media_id: int, user: dict = Depends(require(permissions.CAP_MEDIA))) -> dict[str, Any]:
     row = db.query_one("SELECT * FROM media WHERE id = ?", (media_id,))
     if not row:
         raise HTTPException(status_code=404, detail="Média introuvable")

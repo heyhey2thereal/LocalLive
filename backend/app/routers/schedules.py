@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from .. import db
-from ..deps import admin_user, current_user, require_installed
+from ..deps import current_user, require, require_installed
+from .. import permissions
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
@@ -62,7 +63,7 @@ def list_schedules(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_schedule(payload: SchedulePayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def create_schedule(payload: SchedulePayload, user: dict = Depends(require(permissions.CAP_SCHEDULE))) -> dict[str, Any]:
     if payload.playlist_id is not None and not db.query_one(
         "SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)
     ):
@@ -83,7 +84,7 @@ def create_schedule(payload: SchedulePayload, user: dict = Depends(admin_user)) 
 
 @router.put("/{schedule_id}")
 def update_schedule(
-    schedule_id: int, payload: SchedulePayload, user: dict = Depends(admin_user)
+    schedule_id: int, payload: SchedulePayload, user: dict = Depends(require(permissions.CAP_SCHEDULE))
 ) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM schedules WHERE id = ?", (schedule_id,)):
         raise HTTPException(status_code=404, detail="Programme introuvable")
@@ -103,7 +104,7 @@ def update_schedule(
 
 
 @router.delete("/{schedule_id}")
-def delete_schedule(schedule_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_schedule(schedule_id: int, user: dict = Depends(require(permissions.CAP_SCHEDULE))) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM schedules WHERE id = ?", (schedule_id,)):
         raise HTTPException(status_code=404, detail="Programme introuvable")
     db.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))

@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from .. import db, fx
-from ..deps import admin_user, current_user, require_installed
+from ..deps import current_user, require, require_installed
+from .. import permissions
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
@@ -85,7 +86,7 @@ def list_scenes(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_scene(payload: ScenePayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def create_scene(payload: ScenePayload, user: dict = Depends(require(permissions.CAP_SCENES))) -> dict[str, Any]:
     sid = db.execute(
         "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
         (
@@ -109,7 +110,7 @@ def get_scene(scene_id: int, user: dict = Depends(current_user)) -> dict[str, An
 
 @router.put("/{scene_id}")
 def update_scene(
-    scene_id: int, payload: ScenePayload, user: dict = Depends(admin_user)
+    scene_id: int, payload: ScenePayload, user: dict = Depends(require(permissions.CAP_SCENES))
 ) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM scenes WHERE id = ?", (scene_id,)):
         raise HTTPException(status_code=404, detail="Scène introuvable")
@@ -128,7 +129,7 @@ def update_scene(
 
 
 @router.delete("/{scene_id}")
-def delete_scene(scene_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+def delete_scene(scene_id: int, user: dict = Depends(require(permissions.CAP_SCENES))) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM scenes WHERE id = ?", (scene_id,)):
         raise HTTPException(status_code=404, detail="Scène introuvable")
     db.execute("DELETE FROM scenes WHERE id = ?", (scene_id,))
