@@ -50,13 +50,30 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 ### Playlists
 - Création et édition, ajout/retrait de médias et de scènes.
 - **Réorganisation par glisser-déposer**, durées d'image configurables.
+- **Transition d'entrée par élément** (coupe, fondu, balayage, cercle, zoom…).
+- **Musique de fond par élément** : piste audio mixée sous l'élément, volume réglable.
+- Bouton **Aperçu** par élément (vidéo/image).
 - Lecture en boucle ou unique, progression automatique.
 
 ### Éditeur de scènes
-- Canevas de prévisualisation visuel.
-- Calques multiples : vidéos, images, textes, logos, bandeaux.
-- Position, taille, opacité, ordre (z), visibilité — à la souris ou au clavier.
-- Enregistrement et réutilisation dans les playlists.
+- Canevas interactif : calques déplaçables, **8 poignées de redimensionnement**.
+- **Magnétisme à la grille** (Maj) et ajustement aux flèches (1 px / 10 px).
+- Calques : vidéos, images, textes, logos, bandeaux, **visuels réactifs** et **code FFmpeg**.
+- **Animations** : défilement (marquee), compte à rebours, clignotement, pulsation, fondu, glissement.
+- **Rotation**, opacité, ordre (z), visibilité, duplication.
+- **Visualiseurs réactifs** pilotés par l'audio : spectre, oscilloscope, barres, vectorscope.
+- Calque **« code »** : chaîne de filtres FFmpeg personnalisée (échappée côté serveur).
+
+### Aperçu / Programme
+- Deux fenêtres côte à côte : **Aperçu** (playlist choisie) et **Programme** (à l'antenne).
+- **Prise d'antenne** en un clic (bascule de playlist sans couper la diffusion).
+- Liste des **sorties actives**.
+
+### Flux de sortie
+- **Plusieurs destinations simultanées** (fan-out) : YouTube, Twitch, serveur perso…
+- Par flux : nom, description, **étiquettes**, **confidentialité**, catégorie, encodage,
+  résolution, débit, activation.
+- **Test de connexion** RTMP et clé de flux **jamais exposée** (masquée).
 
 ### Programmation
 - Programmes **quotidiens et hebdomadaires** (plages horaires récurrentes).
@@ -67,6 +84,7 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 ### Diffusion
 - Moteur **FFmpeg** continu 24/7, indépendant du navigateur.
 - Médias mixtes dans une même playlist (vidéo + image + audio + scène).
+- **Fan-out multi-sorties** dans un seul processus (split/asplit, un encodage par sortie).
 - Sortie **RTMP** (YouTube Live, Twitch, serveur perso) ou fichier local.
 - Réglages : clé de flux, débit, résolution, images/s, préréglage.
 - **Récupération automatique** après erreur de lecture.
@@ -100,8 +118,14 @@ Deux pipelines sont choisis dynamiquement :
 
 | Pipeline | Quand | Coût |
 |----------|-------|------|
-| **Copie directe** (`-c copy`) | Toutes les vidéos ont le même codec, la même résolution et le même fps | Presque nul (pas de réencodage) |
-| **Encodage normalisé** (`-filter_complex`) | Médias mixtes, images, audio, scènes, formats hétérogènes | Réencodage x264 |
+| **Copie directe** (`-c copy`) | Toutes les vidéos ont le même codec, la même résolution et le même fps, sans transition ni musique de fond | Presque nul (pas de réencodage) |
+| **Encodage normalisé** (`-filter_complex`) | Médias mixtes, images, audio, scènes, transitions, musique de fond, fan-out | Réencodage x264 |
+
+Le graphe d'encodage construit des **segments** normalisés (scale/pad/fps), les
+assemble par **`concat`** (coupes franches) ou **`xfade`/`acrossfade`** (par
+jonction, selon la transition de chaque élément), puis **`split`/`asplit`** vers
+une sortie par flux actif. Les effets visuels (animations, visualiseurs,
+transitions) sont décrits dans `backend/app/fx.py`.
 
 ---
 
@@ -281,11 +305,14 @@ pip install pytest httpx
 cd backend && python -m pytest ../tests -q
 ```
 
-La suite couvre : authentification et assistant, médiathèque (import, analyse,
-vignettes, plages, dossiers), playlists et réordonnancement, scènes,
-programmation, diffusion (démarrage/arrêt, réglages, masquage de la clé),
-métriques système, et le **moteur FFmpeg réel** (copie directe, encodage mixte,
-boucle, récupération). Les tests génèrent leurs propres médias avec FFmpeg.
+La suite (**75 tests**) couvre : authentification et assistant, médiathèque
+(import, analyse, vignettes, plages, dossiers), playlists et réordonnancement,
+scènes (calques étendus), programmation, diffusion (démarrage/arrêt, réglages,
+masquage de la clé), métriques système, **effets** (transitions, musique de fond,
+calques réactifs et code, fan-out) et **flux de sortie** (CRUD, validation,
+catalogue, aperçu/programme), ainsi que le **moteur FFmpeg réel** (copie directe,
+encodage mixte, transitions, boucle, récupération). Les tests génèrent leurs
+propres médias avec FFmpeg.
 
 ---
 
@@ -360,20 +387,24 @@ LocalLive/
 │       ├── deps.py       # Dépendances (auth, admin, installé)
 │       ├── monitor.py    # CPU / RAM / disque via /proc
 │       ├── probe.py      # FFprobe et vignettes
-│       ├── engine.py     # Moteur de diffusion FFmpeg 24/7
+│       ├── engine.py     # Moteur de diffusion FFmpeg 24/7 (xfade, fan-out)
+│       ├── fx.py         # Effets : animations, visualiseurs, transitions
 │       ├── logging_setup.py
 │       └── routers/      # setup, auth, media, folders, playlists,
-│                         # scenes, schedules, broadcast, system
+│                         # scenes, streams, schedules, broadcast, meta, system
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── src/
 │       ├── main.tsx, App.tsx, api.ts, auth.tsx, i18n.ts, styles.css
-│       ├── components/   # Layout, ui, icons
-│       └── pages/        # SetupWizard, Login, Dashboard, MediaLibrary,
-│                         # Playlists, Scenes, Scheduling, Settings
+│       ├── lib/          # usePoll (polling sans chevauchement)
+│       ├── components/   # Layout, Logo, SceneCanvas, ui, icons
+│       └── pages/        # SetupWizard, Login, Dashboard, PreviewProgram,
+│                         # Streams, MediaLibrary, Playlists, Scenes,
+│                         # Scheduling, Settings
 ├── scripts/common.sh     # Helpers des scripts (couleurs, spinners)
-└── tests/                # pytest : auth, média, playlists, moteur, diffusion
+└── tests/                # pytest : auth, média, playlists, effets,
+                          # flux, moteur, diffusion
 ```
 
 ---
