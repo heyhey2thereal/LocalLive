@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
 LAYER_TYPES = {
     "video", "image", "text", "logo", "overlay", "reactive", "code", "chat",
-    "countdown", "web",
+    "countdown", "web", "clock", "ticker",
 }
 ANIMATIONS = set(fx.ANIMATIONS)
 IN_ANIMATIONS = set(fx.IN_ANIMATIONS)
@@ -54,6 +54,12 @@ class Layer(BaseModel):
     # Countdown layer.
     countdown_seconds: int = 60
     countdown_mode: str = "down"
+    # Clock layer.
+    clock_format: str = "%H:%M"
+    clock_utc: bool = False
+    # Ticker layer (RSS/Atom).
+    feed_url: str | None = None
+    feed_limit: int = 8
     # Web/URL layer (image fetched over HTTP).
     url: str | None = None
     # Gaussian blur radius (0 = none).
@@ -154,6 +160,26 @@ def get_scene(scene_id: int, user: dict = Depends(current_user)) -> dict[str, An
     if not row:
         raise HTTPException(status_code=404, detail="Scène introuvable")
     return _scene_dict(row)
+
+
+@router.post("/{scene_id}/duplicate", status_code=status.HTTP_201_CREATED)
+def duplicate_scene(scene_id: int, user: dict = Depends(require(permissions.CAP_SCENES))) -> dict[str, Any]:
+    """Copy a scene (layers included) under a new name."""
+    row = db.query_one("SELECT * FROM scenes WHERE id = ?", (scene_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Scène introuvable")
+    name = f"{row['name']} (copie)"
+    # Avoid clashing names by appending a counter.
+    existing = {r["name"] for r in db.query("SELECT name FROM scenes")}
+    counter = 2
+    while name in existing:
+        name = f"{row['name']} (copie {counter})"
+        counter += 1
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        (name, row["width"], row["height"], row["background"], row["layers"]),
+    )
+    return _scene_dict(db.query_one("SELECT * FROM scenes WHERE id = ?", (sid,)))
 
 
 @router.put("/{scene_id}")

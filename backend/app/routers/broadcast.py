@@ -109,6 +109,24 @@ def switch(playlist_id: int, user: dict = Depends(require(permissions.CAP_BROADC
     return result
 
 
+@router.post("/next")
+def next_item(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
+    """Skip to the next playlist item immediately."""
+    result = get_engine().skip(1)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Échec du passage"))
+    return result
+
+
+@router.post("/previous")
+def previous_item(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
+    """Go back to the previous playlist item immediately."""
+    result = get_engine().skip(-1)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Échec du passage"))
+    return result
+
+
 @router.get("/settings")
 def get_settings(user: dict = Depends(current_user)) -> dict[str, Any]:
     data: dict[str, Any] = {}

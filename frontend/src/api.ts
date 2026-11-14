@@ -128,6 +128,8 @@ export type LayerType =
   | 'chat'
   | 'countdown'
   | 'web'
+  | 'clock'
+  | 'ticker'
 
 export interface SceneLayer {
   type: LayerType
@@ -157,6 +159,12 @@ export interface SceneLayer {
   // countdown layer
   countdown_seconds?: number
   countdown_mode?: 'up' | 'down'
+  // clock layer
+  clock_format?: string
+  clock_utc?: boolean
+  // ticker layer (RSS/Atom)
+  feed_url?: string | null
+  feed_limit?: number
   // web/url layer
   url?: string | null
   // visual effects
@@ -333,6 +341,8 @@ export interface Catalog {
   anim_loop?: CatalogOption[]
   anim_out?: CatalogOption[]
   visualizers: CatalogOption[]
+  clock_formats?: CatalogOption[]
+  clock_locales?: CatalogOption[]
   layer_types: LayerTypeInfo[]
   code_examples: { label: string; code: string }[]
   roles?: { id: string; label: string; description: string }[]

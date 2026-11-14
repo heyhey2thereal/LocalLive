@@ -13,7 +13,13 @@ const MAX_PREVIEW_W = 720
 // Every layer gets an explicit size so it can never overflow the frame: text
 // and box layers are sized too (the font scales with the box).
 const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
-  const isBox = type === 'text' || type === 'overlay' || type === 'chat' || type === 'countdown'
+  const isBox =
+    type === 'text' ||
+    type === 'overlay' ||
+    type === 'chat' ||
+    type === 'countdown' ||
+    type === 'clock' ||
+    type === 'ticker'
   return {
     type,
     x: 80,
@@ -24,14 +30,22 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
     visible: true,
     z,
     rotation: 0,
-    text: type === 'text' ? 'Votre texte' : type === 'overlay' ? 'Bandeau' : null,
-    font_size: type === 'text' ? 64 : type === 'countdown' ? 96 : type === 'chat' ? 28 : 36,
+    text:
+      type === 'text'
+        ? 'Votre texte'
+        : type === 'overlay'
+          ? 'Bandeau'
+          : type === 'ticker'
+            ? 'Bandeau d’actualités'
+            : null,
+    font_size: type === 'text' ? 64 : type === 'countdown' ? 96 : type === 'clock' ? 72 : type === 'ticker' ? 40 : type === 'chat' ? 28 : 36,
     color: '#ffffff',
-    background: type === 'overlay' || type === 'chat' || type === 'countdown' ? '#000000' : null,
+    background:
+      type === 'overlay' || type === 'chat' || type === 'countdown' || type === 'ticker' ? '#000000' : null,
     media_id: null,
     animation: 'none',
     anim_in: 'none',
-    anim_loop: 'none',
+    anim_loop: type === 'ticker' ? 'marquee' : 'none',
     anim_out: 'none',
     animation_speed: null,
     visualizer: type === 'reactive' ? 'spectrum' : null,
@@ -40,6 +54,10 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
     chat_lines: type === 'chat' ? 8 : undefined,
     countdown_seconds: type === 'countdown' ? 60 : undefined,
     countdown_mode: type === 'countdown' ? 'down' : undefined,
+    clock_format: type === 'clock' ? '%H:%M' : undefined,
+    clock_utc: type === 'clock' ? false : undefined,
+    feed_url: type === 'ticker' ? '' : undefined,
+    feed_limit: type === 'ticker' ? 8 : undefined,
     url: type === 'web' ? 'https://' : null,
   }
 }
@@ -199,6 +217,16 @@ export default function Scenes() {
     }
   }
 
+  const duplicateScene = async (s: Scene) => {
+    try {
+      const copy = await api.post<Scene>(`/api/scenes/${s.id}/duplicate`, {})
+      await load()
+      push({ kind: 'ok', title: 'Scène dupliquée', message: copy.name })
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Duplication impossible', message: err?.message })
+    }
+  }
+
   // Size the canvas so it always fits both the available width and the window
   // height (minus chrome), so the editor never overflows. It is the exact
   // preview frame — nothing larger.
@@ -253,6 +281,17 @@ export default function Scenes() {
                   {s.width}×{s.height}
                 </div>
               </div>
+              <button
+                className="card-duplicate"
+                title="Dupliquer la scène"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  void duplicateScene(s)
+                }}
+              >
+                <IconDuplicate size={15} />
+              </button>
               <button
                 className="card-delete"
                 title="Supprimer la scène"
@@ -433,6 +472,8 @@ export default function Scenes() {
                     <option value="reactive">Réactif (audio)</option>
                     <option value="chat">Chat box</option>
                     <option value="countdown">Compte à rebours</option>
+                    <option value="clock">Horloge (date / heure)</option>
+                    <option value="ticker">Bandeau d'actualités (RSS)</option>
                     <option value="web">URL web</option>
                     <option value="code">Code FFmpeg</option>
                   </select>
@@ -520,6 +561,86 @@ export default function Scenes() {
                       </div>
                     </div>
                     <span className="hint">Rendu par FFmpeg (drawtext avec expression temporelle).</span>
+                  </div>
+                )}
+
+                {layer.type === 'clock' && (
+                  <div className="field" style={{ gridColumn: 'span 3' }}>
+                    <label>Horloge</label>
+                    <div className="flex gap-12 items-center" style={{ flexWrap: 'wrap' }}>
+                      <div className="field" style={{ margin: 0, minWidth: 240 }}>
+                        <span className="text-sm muted-2">Format</span>
+                        <select
+                          className="select"
+                          value={layer.clock_format ?? '%H:%M'}
+                          onChange={(e) => updateLayer(selectedLayer!, { clock_format: e.target.value })}
+                        >
+                          {(catalog?.clock_formats ?? []).map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <label className="flex items-center gap-8" style={{ marginTop: 18 }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(layer.clock_utc)}
+                          onChange={(e) => updateLayer(selectedLayer!, { clock_utc: e.target.checked })}
+                        />
+                        <span className="text-sm muted">Heure UTC</span>
+                      </label>
+                    </div>
+                    <span className="hint">Affichée en direct, mise à jour par FFmpeg (aucun rechargement).</span>
+                  </div>
+                )}
+
+                {layer.type === 'ticker' && (
+                  <div className="field" style={{ gridColumn: 'span 3' }}>
+                    <label>Bandeau d'actualités — source RSS / Atom</label>
+                    <div className="flex gap-8 items-center">
+                      <input
+                        className="input mono grow"
+                        value={layer.feed_url ?? ''}
+                        onChange={(e) => updateLayer(selectedLayer!, { feed_url: e.target.value })}
+                        placeholder="https://exemple.com/rss.xml"
+                      />
+                      <button
+                        className="btn btn-sm"
+                        onClick={async () => {
+                          if (!layer.feed_url) return
+                          try {
+                            const d = await api.get<{ items: { title: string }[] }>(
+                              `/api/meta/feed?url=${encodeURIComponent(layer.feed_url)}&limit=3`,
+                            )
+                            push({
+                              kind: d.items.length ? 'ok' : 'err',
+                              title: d.items.length ? `${d.items.length} titre(s) trouvé(s)` : 'Aucun titre',
+                              message: d.items.map((i) => i.title).join(' • '),
+                            })
+                          } catch (err: any) {
+                            push({ kind: 'err', title: 'Flux illisible', message: err?.message })
+                          }
+                        }}
+                      >
+                        Tester
+                      </button>
+                      <div className="field" style={{ margin: 0 }}>
+                        <span className="text-sm muted-2">Titres</span>
+                        <input
+                          className="input"
+                          type="number"
+                          min={1}
+                          max={20}
+                          style={{ width: 80 }}
+                          value={layer.feed_limit ?? 8}
+                          onChange={(e) => updateLayer(selectedLayer!, { feed_limit: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <span className="hint">
+                      Les titres sont récupérés et mis en cache quelques minutes, puis défilent (animation LOOP).
+                    </span>
                   </div>
                 )}
 

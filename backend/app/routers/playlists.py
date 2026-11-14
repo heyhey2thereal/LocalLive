@@ -117,6 +117,40 @@ def get_playlist(playlist_id: int, user: dict = Depends(current_user)) -> dict[s
     return _playlist_dict(row)
 
 
+@router.post("/{playlist_id}/duplicate", status_code=status.HTTP_201_CREATED)
+def duplicate_playlist(
+    playlist_id: int, user: dict = Depends(require(permissions.CAP_PLAYLISTS))
+) -> dict[str, Any]:
+    """Copy a playlist and all of its items under a new name."""
+    row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Playlist introuvable")
+    name = f"{row['name']} (copie)"
+    existing = {r["name"] for r in db.query("SELECT name FROM playlists")}
+    counter = 2
+    while name in existing:
+        name = f"{row['name']} (copie {counter})"
+        counter += 1
+    new_id = db.execute(
+        "INSERT INTO playlists(name, description, loop) VALUES(?,?,?)",
+        (name, row["description"], row["loop"]),
+    )
+    # Copy every item, preserving order, transitions and background music.
+    items = db.query("SELECT * FROM playlist_items WHERE playlist_id = ? ORDER BY position", (playlist_id,))
+    for item in items:
+        db.execute(
+            """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
+                                          transition, transition_duration, background_audio_id, background_volume)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                new_id, item["media_id"], item["scene_id"], item["position"], item["duration"],
+                item["transition"], item["transition_duration"],
+                item["background_audio_id"], item["background_volume"],
+            ),
+        )
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (new_id,)))
+
+
 @router.patch("/{playlist_id}")
 def update_playlist(
     playlist_id: int, payload: PlaylistPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))

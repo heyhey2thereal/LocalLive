@@ -562,6 +562,27 @@ video {
 
 /* Media grid */
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
+/* Dashboard scene quick-launch: a strip of clickable scene renders. */
+.quick-scenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.quick-scene {
+  display: flex; flex-direction: column; gap: 6px; padding: 0; cursor: pointer;
+  background: transparent; border: none; font-family: inherit; color: var(--text-1);
+  text-align: left;
+}
+.quick-scene:disabled { opacity: 0.5; cursor: wait; }
+.quick-scene-thumb {
+  position: relative; display: block; border-radius: var(--radius);
+  border: 1px solid var(--line); overflow: hidden; background: #05070a;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.quick-scene:hover .quick-scene-thumb { border-color: var(--accent); transform: translateY(-2px); }
+.quick-scene-thumb .scene-canvas { width: 100% !important; }
+.quick-scene-play {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: #fff; background: rgba(11, 13, 18, 0.45); opacity: 0; transition: opacity 0.15s ease;
+}
+.quick-scene:hover .quick-scene-play { opacity: 1; }
+.quick-scene-name { font-size: 12.5px; font-weight: 600; }
 .media-card {
   background: var(--bg-2);
   border: 1px solid var(--line-soft);
@@ -581,6 +602,15 @@ video {
   opacity: 0.85; transition: opacity 0.15s ease, background 0.15s ease;
 }
 .card-delete:hover { opacity: 1; background: var(--red); border-color: var(--red); }
+/* Duplicate button, sits just left of the delete button on a card. */
+.card-duplicate {
+  position: absolute; top: 8px; right: 44px; z-index: 5;
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  display: grid; place-items: center; color: #fff;
+  background: rgba(11, 13, 18, 0.72); border: 1px solid var(--line);
+  opacity: 0.85; transition: opacity 0.15s ease, background 0.15s ease;
+}
+.card-duplicate:hover { opacity: 1; background: var(--accent); border-color: var(--accent); }
 .media-thumb {
   aspect-ratio: 16 / 9;
   background: #05070a;

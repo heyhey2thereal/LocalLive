@@ -22,6 +22,7 @@ export default function MediaLibrary() {
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState('all')
+  const [sort, setSort] = useState<'recent' | 'title' | 'size' | 'duration'>('recent')
   const [folderFilter, setFolderFilter] = useState<number | 0 | ''>('')
   const [drag, setDrag] = useState(false)
   const [uploads, setUploads] = useState<UploadJob[]>([])
@@ -58,6 +59,15 @@ export default function MediaLibrary() {
     const t = setTimeout(() => void load(), query ? 250 : 0)
     return () => clearTimeout(t)
   }, [load, query])
+
+  // Sort the loaded items client-side so the sort control reacts instantly
+  // without a round-trip (the list is small: a few hundred rows at most).
+  const sortedItems = [...items].sort((a, b) => {
+    if (sort === 'title') return a.title.localeCompare(b.title, 'fr')
+    if (sort === 'size') return b.size - a.size
+    if (sort === 'duration') return b.duration - a.duration
+    return b.created_at.localeCompare(a.created_at)
+  })
 
   const uploadFiles = async (files: FileList | File[]) => {
     const list = Array.from(files)
@@ -151,6 +161,12 @@ export default function MediaLibrary() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          <select className="select" style={{ width: 170 }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} title="Trier">
+            <option value="recent">Plus récents</option>
+            <option value="title">Nom (A→Z)</option>
+            <option value="size">Taille (décroissante)</option>
+            <option value="duration">Durée (décroissante)</option>
+          </select>
         </div>
         <div className="flex gap-8">
           <button className="btn" onClick={createFolder}>
@@ -256,7 +272,7 @@ export default function MediaLibrary() {
         <EmptyState icon={<IconMedia size={40} />} title="Aucun média" hint="Importez vos premiers fichiers." />
       ) : (
         <div className="media-grid">
-          {items.map((m) => (
+          {sortedItems.map((m) => (
             <div key={m.id} className="media-card" onClick={() => setPreview(m)}>
               <div className="media-thumb">
                 {m.thumbnail_url ? (

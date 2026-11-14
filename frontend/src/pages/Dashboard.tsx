@@ -1,13 +1,15 @@
-import { useState } from 'react'
-import { api, type BroadcastStatus } from '../api'
+import { useEffect, useState } from 'react'
+import { api, type BroadcastStatus, type Media, type Scene } from '../api'
 import { usePoll } from '../lib/usePoll'
 import { useToast } from '../components/ui'
+import { SceneThumb } from '../components/ProgramPreview'
 import {
   IconCpu,
   IconDisk,
   IconRam,
   IconRefresh,
   IconSignal,
+  IconZap,
 } from '../components/icons'
 import { EmptyState, formatBytes, formatDuration, formatUptime, Loading } from '../components/ui'
 
@@ -23,6 +25,20 @@ function MetricBar({ percent }: { percent: number }) {
 export default function Dashboard() {
   const { push } = useToast()
   const [busy, setBusy] = useState(false)
+  // Scene quick-launch: pick a scene, build a one-item playlist on the fly and
+  // send it straight to air. Saves the operator a trip through Playlists.
+  const [scenes, setScenes] = useState<Scene[]>([])
+  const [media, setMedia] = useState<Media[]>([])
+
+  useEffect(() => {
+    Promise.all([
+      api.get<{ items: Scene[] }>('/api/scenes').catch(() => ({ items: [] })),
+      api.get<{ items: Media[] }>('/api/media').catch(() => ({ items: [] })),
+    ]).then(([s, m]) => {
+      setScenes(s.items)
+      setMedia(m.items)
+    })
+  }, [])
 
   // Poll the full status: it carries the engine state, the system metrics and
   // the fallback playlist name that the panel below displays. usePoll keeps the
@@ -41,6 +57,22 @@ export default function Dashboard() {
       poll.refresh()
     } catch (err: any) {
       push({ kind: 'err', title: 'Action impossible', message: err?.message ?? '' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Build a one-item playlist for a scene and take it to air in one step.
+  const quickLaunch = async (scene: Scene) => {
+    setBusy(true)
+    try {
+      const pl = await api.post<{ id: number }>('/api/playlists', { name: `Direct — ${scene.name}` })
+      await api.post(`/api/playlists/${pl.id}/items`, { scene_id: scene.id })
+      await api.post('/api/broadcast/start', { playlist_id: pl.id, output_id: 'primary' })
+      push({ kind: 'ok', title: 'Scène à l’antenne', message: scene.name })
+      poll.refresh()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Mise à l’antenne impossible', message: err?.message ?? '' })
     } finally {
       setBusy(false)
     }
@@ -269,6 +301,34 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {scenes.length > 0 && (
+        <div className="card mt-24">
+          <div className="card-head">
+            <span className="card-title">Mise à l'antenne rapide</span>
+            <span className="text-sm muted-2">Un clic : la scène part en direct</span>
+          </div>
+          <div className="quick-scenes">
+            {scenes.slice(0, 12).map((s) => (
+              <button
+                key={s.id}
+                className="quick-scene"
+                disabled={busy}
+                onClick={() => void quickLaunch(s)}
+                title={`Mettre « ${s.name} » à l'antenne`}
+              >
+                <span className="quick-scene-thumb">
+                  <SceneThumb scene={s} media={media} width={160} />
+                  <span className="quick-scene-play">
+                    <IconZap size={16} />
+                  </span>
+                </span>
+                <span className="quick-scene-name truncate">{s.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {engine.log_tail.length > 0 && (
         <div className="card mt-24">

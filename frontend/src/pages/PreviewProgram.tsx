@@ -32,6 +32,7 @@ export default function PreviewProgram() {
   const [busy, setBusy] = useState(false)
   const [txClass, setTxClass] = useState('')
   const [confirm, setConfirm] = useState<'start' | 'stop' | null>(null)
+  const [showHelp, setShowHelp] = useState(false)
   // Output chosen in the start dialog: 'primary', 'all' or a stream id.
   const [startOutput, setStartOutput] = useState<string>('primary')
   const txTimer = useRef<number | null>(null)
@@ -146,10 +147,56 @@ export default function PreviewProgram() {
     }
   }
 
+  const skip = async (direction: 1 | -1) => {
+    setBusy(true)
+    try {
+      await api.post(`/api/broadcast/${direction > 0 ? 'next' : 'previous'}`, {})
+      push({ kind: 'ok', title: direction > 0 ? 'Élément suivant' : 'Élément précédent' })
+      poll.refresh()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Passage impossible', message: err?.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Keyboard shortcuts for a live operator: space takes the preview to air,
+  // arrows skip items, ? shows the help. Ignored while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      if (e.key === '?') {
+        e.preventDefault()
+        setShowHelp((v) => !v)
+      } else if (e.key === ' ' && !busy && target) {
+        e.preventDefault()
+        void swap()
+      } else if (e.key === 'ArrowRight' && running && !busy) {
+        e.preventDefault()
+        void skip(1)
+      } else if (e.key === 'ArrowLeft' && running && !busy) {
+        e.preventDefault()
+        void skip(-1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, running, target, transition])
+
   if (poll.loading && !program) return <Loading />
 
   return (
     <div className="switcher-page">
+      <div className="flex justify-between items-center mb-8">
+        <span className="text-sm muted-2">
+          Raccourcis : Espace = prise d'antenne · ← → = élément précédent/suivant
+        </span>
+        <button className="btn btn-ghost btn-sm" onClick={() => setShowHelp(true)} title="Aide des raccourcis">
+          ? Aide
+        </button>
+      </div>
       <div className="switcher-row">
         {/* PREVIEW (left) */}
         <div className="switcher-monitor">
@@ -214,6 +261,22 @@ export default function PreviewProgram() {
               <IconPlay size={18} /> Démarrer le direct
             </button>
           )}
+          <button
+            className="btn"
+            disabled={busy || !running}
+            onClick={() => void skip(-1)}
+            title="Élément précédent"
+          >
+            ⏮
+          </button>
+          <button
+            className="btn"
+            disabled={busy || !running}
+            onClick={() => void skip(1)}
+            title="Élément suivant"
+          >
+            ⏭
+          </button>
         </div>
         <div className="flex gap-8 items-center">
           <span className="text-sm muted-2 nowrap">Transition</span>
@@ -249,6 +312,27 @@ export default function PreviewProgram() {
             ))}
           </div>
         </div>
+      )}
+
+      {showHelp && (
+        <Modal title="Raccourcis clavier" onClose={() => setShowHelp(false)}>
+          <div className="list">
+            {[
+              ['Espace', "Prendre l'antenne (aperçu → programme)"],
+              ['→', 'Élément suivant'],
+              ['←', 'Élément précédent'],
+              ['?', 'Afficher / masquer cette aide'],
+            ].map(([key, label]) => (
+              <div key={key} className="flex justify-between items-center" style={{ padding: '6px 0' }}>
+                <span className="badge mono">{key}</span>
+                <span className="text-sm muted">{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm muted-2 mt-16">
+            Les raccourcis sont ignorés pendant la saisie dans un champ.
+          </p>
+        </Modal>
       )}
 
       {confirm && (

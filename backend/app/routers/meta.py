@@ -55,6 +55,16 @@ LAYER_TYPES = [
         "help": "Affiche un compteur. Réglez la durée de départ et le sens (décompte ou comptage).",
     },
     {
+        "id": "clock",
+        "label": "Horloge",
+        "help": "Affiche l'heure et/ou la date en direct. Choisissez le format (heure, date, jour) et le fuseau.",
+    },
+    {
+        "id": "ticker",
+        "label": "Bandeau d'actualités (RSS)",
+        "help": "Bandeau défilant alimenté par un flux RSS/Atom. Collez l'URL du flux ; le texte est mis en cache quelques minutes.",
+    },
+    {
         "id": "reactive",
         "label": "Réactif (audio)",
         "help": "Visualiseur piloté par l'audio de l'élément : spectre, oscilloscope, barres, vectorscope.",
@@ -81,6 +91,8 @@ def catalog(user: dict = Depends(current_user)) -> dict[str, Any]:
         "anim_loop": fx.loop_animations_catalog(),
         "anim_out": fx.out_animations_catalog(),
         "visualizers": fx.visualizers_catalog(),
+        "clock_formats": fx.clock_formats_catalog(),
+        "clock_locales": fx.clock_locales_catalog(),
         "roles": permissions.ROLES,
         "capabilities": permissions.capabilities_catalog(),
         "layer_types": LAYER_TYPES,
@@ -97,3 +109,13 @@ def catalog(user: dict = Depends(current_user)) -> dict[str, Any]:
             {"label": "Vignette", "code": "vignette=PI/5"},
         ],
     }
+
+
+@router.get("/feed")
+def feed_preview(url: str, limit: int = 8, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Fetch and parse an RSS/Atom feed so the editor can preview the headlines."""
+    from .. import feeds
+
+    limit = max(1, min(limit, 20))
+    items = feeds.fetch(url, limit=limit, force=True)
+    return {"url": url, "items": items, "count": len(items)}

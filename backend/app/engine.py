@@ -188,6 +188,31 @@ class PlaybackEngine:
             self._terminate_process()  # supervisor restarts with new items
             return {"ok": True}
 
+    def skip(self, direction: int = 1) -> dict[str, Any]:
+        """Jump to the next (direction>0) or previous item immediately.
+
+        Implemented by rotating the resolved item list so the target item is
+        first, then restarting the process: the supervisor picks the new order
+        up and the broadcast keeps running. `direction < 0` restarts the current
+        item if it is the first of the list.
+        """
+        with self._lock:
+            if not self._state.running:
+                return {"ok": False, "error": "La diffusion n'est pas active"}
+            items = (self._desired or {}).get("items") or []
+            if len(items) < 2:
+                return {"ok": False, "error": "Rien à sauter (playlist trop courte)"}
+            step = 1 if direction >= 0 else -1
+            target = (self._state.current_index + step) % len(items)
+            rotated = items[target:] + items[:target]
+            self._state.items = [_public_item(i) for i in rotated]
+            self._state.cycle_duration = sum(i["duration"] for i in rotated)
+            self._state.current_index = 0
+            self._desired = {"playlist_id": self._state.playlist_id, "items": rotated}
+            self._terminate_process()  # supervisor restarts with the new order
+            label = "élément suivant" if step > 0 else "élément précédent"
+            return {"ok": True, "message": f"Passage à l'{label}.", "index": target}
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             s = self._state
@@ -834,6 +859,38 @@ class PlaybackEngine:
             text = "\n".join(f"{m['user']}: {m['text']}" for m in messages)
             fontsize = int(layer.get("font_size", 28))
             filters.append(f"{src}{draw_text(text, fontsize, box=True, spacing=6)}{out_label}")
+            return True
+
+        if ltype == "clock":
+            # Live clock / date. FFmpeg expands `%{localtime:...}` on every frame,
+            # so the display stays current without any re-render from our side.
+            fmt = str(layer.get("clock_format") or "%H:%M")
+            fontsize = int(layer.get("font_size", 64))
+            arg = f"'{fx.clock_text_expr(fmt, utc=bool(layer.get('clock_utc')))}'"
+            dt = (
+                f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:"
+                f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
+            )
+            if font:
+                dt += f":fontfile={font}"
+            if layer.get("background"):
+                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
+            filters.append(f"{src}{dt}{out_label}")
+            return True
+
+        if ltype == "ticker":
+            # Scrolling headline band fed by an RSS/Atom URL. The headlines are
+            # fetched and cached by feeds.py; the marquee motion comes from the
+            # layer's loop animation (defaults to a left-scrolling marquee).
+            from . import feeds
+
+            url = str(layer.get("feed_url") or "").strip()
+            limit = int(layer.get("feed_limit") or 8)
+            text = feeds.ticker_text(url, limit=limit)
+            if not text:
+                text = str(layer.get("text") or "Ticker — renseignez une source RSS")
+            fontsize = int(layer.get("font_size", 40))
+            filters.append(f"{src}{draw_text(text, fontsize, box=True, spacing=4)}{out_label}")
             return True
 
         if ltype == "web":

@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
+import { formatClock } from './ProgramPreview'
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
@@ -347,6 +348,9 @@ export default function SceneCanvas({
           const isReactive = l.type === 'reactive'
           const isChat = l.type === 'chat'
           const isCountdown = l.type === 'countdown'
+          const isClock = l.type === 'clock'
+          const isTicker = l.type === 'ticker'
+          const isBox = isText || isChat || isCountdown || isClock || isTicker
           const isMedia = l.type === 'image' || l.type === 'video' || l.type === 'logo'
           // Cached medium-resolution preview loads fast; thumbnail is the fallback.
           const imgSrc = isMedia && m ? m.preview_url ?? m.stream_url ?? m.thumbnail_url : null
@@ -380,9 +384,9 @@ export default function SceneCanvas({
                 height: lh * scale,
                 opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
                 color: l.color,
-                fontSize: isText || isChat || isCountdown ? (l.font_size ?? 32) * scale : undefined,
-                background: isText || isChat || isCountdown ? l.background ?? 'transparent' : 'transparent',
-                padding: isText || isChat || isCountdown ? '4px 8px' : 0,
+                fontSize: isBox ? (l.font_size ?? 32) * scale : undefined,
+                background: isBox ? l.background ?? 'transparent' : 'transparent',
+                padding: isBox ? '4px 8px' : 0,
                 // When an animation drives `transform`, it also owns the rotation
                 // (via --ll-rot), so we must not set it inline.
                 transform: !anim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
@@ -399,6 +403,16 @@ export default function SceneCanvas({
                 {isCode && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Code</span>}
                 {isChat && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Chat</span>}
                 {isCountdown && <span style={{ fontSize: (l.font_size ?? 96) * scale * 0.5 }}>{l.countdown_seconds ?? 60}</span>}
+                {isClock && (
+                  <span style={{ fontSize: (l.font_size ?? 64) * scale * 0.5 }}>
+                    {formatClock(new Date(), l.clock_format ?? '%H:%M', Boolean(l.clock_utc))}
+                  </span>
+                )}
+                {isTicker && (
+                  <span style={{ fontSize: (l.font_size ?? 40) * scale * 0.5 }}>
+                    {l.feed_url ? 'Bandeau RSS' : 'Bandeau (source RSS)'}
+                  </span>
+                )}
                 {isText && (l.text || 'Texte')}
               </span>
               {selected === i &&

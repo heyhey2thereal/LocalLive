@@ -66,7 +66,10 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - **Magnétisme à la grille** (Maj), ratio verrouillé (Alt), flèches (1 / 10 px).
 - **Menu déroulant recherchable** pour ajouter un calque, avec **aide intégrée**.
 - Types de calques : **Texte, Image, Vidéo, Chat box, Code FFmpeg, URL web,
-  Compte à rebours, Réactif, Logo, Bandeau**.
+  Compte à rebours, Horloge, Bandeau d'actualités (RSS), Réactif, Logo, Bandeau**.
+- **Horloge** : heure/date en direct (formats prêts, option UTC).
+- **Bandeau d'actualités** : titres d'un flux **RSS/Atom** mis en cache puis
+  défilants, avec un bouton **Tester** dans l'éditeur.
 - **Animations IN / LOOP / OUT** combinables : fondu, glissements, zoom, pop,
   défilement, clignotement, pulsation, **tremblement**, flottement, rotation,
   respiration, couleurs. Elles sont **jouées dans l'éditeur** (aperçu en boucle)
@@ -88,6 +91,10 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
   la prise d'antenne **démarre le direct** : aucune étape préalable.
 - Choix de la **transition** (coupe, fondu, balayage…) sous les moniteurs ;
   l'effet joue sur la **fenêtre** du moniteur, pas sur son contenu.
+- **Passage manuel** ⏮ / ⏭ (élément précédent/suivant) et **raccourcis
+  clavier** : **Espace** = prise d'antenne, **←/→** = navigation, **?** = aide.
+- **Mise à l'antenne rapide** depuis le Tableau de bord : un clic sur une scène
+  la met en direct.
 - **Un seul bouton** pour mettre une playlist à l'antenne ; **contenu de
   l'aperçu** listé en bas (masquable).
 - **Ouverture du rendu dans une fenêtre séparée** (moniteur déporté) avec

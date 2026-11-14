@@ -9,7 +9,7 @@ import {
   Modal,
   useToast,
 } from '../components/ui'
-import { IconGrip, IconMusic, IconPlay, IconPlaylist, IconPlus, IconTransition, IconTrash } from '../components/icons'
+import { IconDuplicate, IconGrip, IconMusic, IconPlay, IconPlaylist, IconPlus, IconTransition, IconTrash } from '../components/icons'
 import { SceneThumb } from '../components/ProgramPreview'
 
 export default function Playlists() {
@@ -85,6 +85,18 @@ export default function Playlists() {
       await load()
     } catch (err: any) {
       push({ kind: 'err', title: 'Modification impossible', message: err?.message })
+    }
+  }
+
+  const duplicatePlaylist = async () => {
+    if (!selected) return
+    try {
+      const copy = await api.post<Playlist>(`/api/playlists/${selected.id}/duplicate`, {})
+      await load()
+      setSelectedId(copy.id)
+      push({ kind: 'ok', title: 'Playlist dupliquée', message: copy.name })
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Duplication impossible', message: err?.message })
     }
   }
 
@@ -253,6 +265,9 @@ export default function Playlists() {
                   </label>
                   <button className="btn" onClick={openAdd}>
                     <IconPlus size={16} /> Ajouter
+                  </button>
+                  <button className="btn btn-ghost btn-icon" title="Dupliquer la playlist" onClick={() => void duplicatePlaylist()}>
+                    <IconDuplicate size={16} />
                   </button>
                   <button className="btn btn-danger btn-icon" onClick={() => setToDelete(selected)}>
                     <IconTrash size={16} />

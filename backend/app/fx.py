@@ -13,6 +13,7 @@ database or the process layer.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -398,3 +399,77 @@ def visualizers_catalog() -> list[dict[str, Any]]:
         {"id": key, "label": spec["label"], "description": spec["description"]}
         for key, spec in VISUALIZERS.items()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Clock / date layer
+# ---------------------------------------------------------------------------
+# Common strftime patterns offered by the editor. The value stored on the layer
+# is a strftime format string; it is shown by FFmpeg's drawtext via the `%{gmtime}`
+# expansion (or `localtime` on hosts where the timezone is set).
+CLOCK_FORMATS: list[dict[str, str]] = [
+    {"id": "%H:%M", "label": "Heure (24h) · 14:05"},
+    {"id": "%H:%M:%S", "label": "Heure avec secondes · 14:05:09"},
+    {"id": "%I:%M %p", "label": "Heure (12h) · 02:05 PM"},
+    {"id": "%d/%m/%Y", "label": "Date · 14/11/2026"},
+    {"id": "%A %d %B", "label": "Jour et date · samedi 14 novembre"},
+    {"id": "%d/%m/%Y %H:%M", "label": "Date et heure · 14/11/2026 14:05"},
+    {"id": "%H:%M · %d/%m", "label": "Heure et jour · 14:05 · 14/11"},
+]
+
+# strftime -> drawtext strftime tokens are almost identical, but the leading '%'
+# must be escaped in the filter string and day/month names are locale-dependent.
+# We keep the mapping minimal and pass the format through mostly unchanged.
+CLOCK_LOCALES: list[dict[str, str]] = [
+    {"id": "fr_FR", "label": "Français"},
+    {"id": "en_US", "label": "English"},
+    {"id": "es_ES", "label": "Español"},
+    {"id": "de_DE", "label": "Deutsch"},
+]
+
+
+def clock_formats_catalog() -> list[dict[str, str]]:
+    return [dict(entry) for entry in CLOCK_FORMATS]
+
+
+def clock_locales_catalog() -> list[dict[str, str]]:
+    return [dict(entry) for entry in CLOCK_LOCALES]
+
+
+# A strftime directive: "%" followed by a letter, or "%%" for a literal percent.
+_STRFTIME_DIRECTIVE = re.compile(r"%[A-Za-z]|%%")
+
+
+def _escape_clock_literal(text: str) -> str:
+    """Escape literal text for use inside a drawtext `text=` value.
+
+    A colon must be escaped so the filtergraph parser does not read it as an
+    option separator; a backslash and a quote are escaped for the same reason.
+    """
+    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def clock_text_expr(fmt: str, *, utc: bool = False) -> str:
+    """Build the FFmpeg drawtext expansion for a live clock.
+
+    FFmpeg exposes `gmtime` (UTC) and `localtime` (host timezone) as
+    `%{localtime:FORMAT}`, but the expansion parser treats every colon inside the
+    format as an argument separator, so `%{localtime:%H:%M}` is rejected. We
+    therefore expand each strftime directive on its own and join the pieces with
+    escaped literal separators, e.g. `%{localtime\\:%H}\\:%{localtime\\:%M}`.
+    """
+    source = "gmtime" if utc else "localtime"
+    fmt = fmt or "%H:%M"
+    parts: list[str] = []
+    pos = 0
+    for match in _STRFTIME_DIRECTIVE.finditer(fmt):
+        parts.append(_escape_clock_literal(fmt[pos:match.start()]))
+        token = match.group(0)
+        if token == "%%":
+            parts.append("%")
+        else:
+            parts.append(f"%{{{source}\\:{token}}}")
+        pos = match.end()
+    parts.append(_escape_clock_literal(fmt[pos:]))
+    return "".join(parts)
+

@@ -34,11 +34,73 @@ function Countdown({ total, mode, fontPx }: { total: number; mode: string; fontP
   return <span style={{ fontSize: fontPx }}>{mm}:{ss}</span>
 }
 
+// Live date/time, mirroring the FFmpeg `%{localtime:...}` expansion. The format
+// is a strftime string; we translate the tokens the editor offers.
+const FR_DAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+const FR_MONTHS = [
+  'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+]
+
+export function formatClock(date: Date, fmt: string, utc: boolean): string {
+  const d = utc
+    ? new Date(date.getTime() + date.getTimezoneOffset() * 60000)
+    : date
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hours24 = d.getHours()
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
+  const map: Record<string, string> = {
+    '%H': pad(hours24),
+    '%M': pad(d.getMinutes()),
+    '%S': pad(d.getSeconds()),
+    '%I': pad(hours12),
+    '%p': hours24 < 12 ? 'AM' : 'PM',
+    '%d': pad(d.getDate()),
+    '%m': pad(d.getMonth() + 1),
+    '%Y': String(d.getFullYear()),
+    '%A': FR_DAYS[d.getDay()],
+    '%B': FR_MONTHS[d.getMonth()],
+  }
+  return fmt.replace(/%[HMSIpdmYA B]/g, (token) => map[token] ?? token)
+}
+
+function Clock({ fmt, utc, fontPx }: { fmt: string; utc: boolean; fontPx: number }) {
+  const [text, setText] = useState(() => formatClock(new Date(), fmt, utc))
+  useEffect(() => {
+    const t = window.setInterval(() => setText(formatClock(new Date(), fmt, utc)), 1000)
+    return () => window.clearInterval(t)
+  }, [fmt, utc])
+  return <span style={{ fontSize: fontPx }}>{text}</span>
+}
+
+// Scrolling headline band fed by an RSS feed. The editor previews the first
+// headline; the on-air text is built by the engine from the cached feed.
+function Ticker({ layer, fontPx }: { layer: SceneLayer; fontPx: number }) {
+  const [headline, setHeadline] = useState(layer.text || 'Bandeau d’actualités')
+  useEffect(() => {
+    const url = layer.feed_url
+    if (!url) return
+    let active = true
+    fetch(`/api/meta/feed?url=${encodeURIComponent(url)}&limit=1`, { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (active && d.items?.length) setHeadline(d.items[0].title)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [layer.feed_url, layer.text])
+  return <span style={{ fontSize: fontPx }}>{headline}</span>
+}
+
 function layerBadge(l: SceneLayer): string | null {
   if (l.type === 'reactive') return `Réactif · ${l.visualizer ?? ''}`
   if (l.type === 'code') return `Code · ${l.code ?? ''}`
   if (l.type === 'chat') return `Chat · ${l.chat_source ?? ''}`
   if (l.type === 'countdown') return `Compte à rebours · ${l.countdown_seconds ?? 60}s`
+  if (l.type === 'clock') return `Horloge · ${l.clock_format ?? '%H:%M'}`
+  if (l.type === 'ticker') return `Bandeau · ${l.feed_url ? 'RSS' : 'vide'}`
   if (l.type === 'web') return `URL · ${l.url ?? ''}`
   return null
 }
@@ -72,7 +134,8 @@ export function SceneRender({
         .map(({ l, i }) => {
           const m = media.find((x) => x.id === l.media_id)
           const isText = l.type === 'text' || l.type === 'overlay'
-          const isBox = isText || l.type === 'chat' || l.type === 'countdown'
+          const isBox =
+            isText || l.type === 'chat' || l.type === 'countdown' || l.type === 'clock' || l.type === 'ticker'
           const badge = layerBadge(l)
           const isMedia = l.type === 'image' || l.type === 'video' || l.type === 'logo'
           // The cached medium-resolution preview loads fast and stays sharp; the
@@ -125,6 +188,14 @@ export function SceneRender({
                     fontPx={(l.font_size ?? 96) * scale}
                   />
                 )}
+                {l.type === 'clock' && (
+                  <Clock
+                    fmt={l.clock_format ?? '%H:%M'}
+                    utc={Boolean(l.clock_utc)}
+                    fontPx={(l.font_size ?? 64) * scale}
+                  />
+                )}
+                {l.type === 'ticker' && <Ticker layer={l} fontPx={(l.font_size ?? 40) * scale} />}
                 {isText && (l.text || 'Texte')}
               </span>
             </div>

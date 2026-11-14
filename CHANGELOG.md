@@ -3,6 +3,34 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.8.0] — 2026-11-14
+
+### Ajouté
+- **Calque Horloge** : affiche l'heure et/ou la date en direct (formats prêts :
+  heure 24h/12h, date, jour + mois). Rendu par FFmpeg (`%{localtime}`), mis à
+  jour à chaque image, sans rechargement. Option UTC.
+- **Calque Bandeau d'actualités (RSS)** : bandeau défilant alimenté par un flux
+  **RSS ou Atom**. Les titres sont récupérés et **mis en cache 5 minutes** côté
+  serveur (module `feeds.py`, sans dépendance), puis défilent (animation LOOP).
+  Un bouton **Tester** dans l'éditeur affiche les premiers titres.
+- **Passage manuel** : boutons **⏮ / ⏭** dans Aperçu / Programme pour passer à
+  l'élément précédent/suivant sans attendre la fin (`POST /api/broadcast/next`,
+  `/previous`).
+- **Raccourcis clavier** dans Aperçu / Programme : **Espace** = prise d'antenne,
+  **← / →** = élément précédent/suivant, **?** = aide (nouvelle fenêtre d'aide).
+- **Mise à l'antenne rapide** (Tableau de bord) : une bande de scènes ; un clic
+  crée la playlist, y place la scène et démarre le direct vers la sortie
+  principale.
+- **Duplication** : d'une **scène** (bouton sur la carte) et d'une **playlist**
+  (bouton dans l'en-tête), copie complète des calques / éléments.
+- **Médiathèque** : tri (plus récents, nom, taille, durée) en plus de la
+  recherche et des filtres existants.
+
+### Corrigé
+- **Horloge** : `%{localtime:%H:%M}` était rejeté par FFmpeg (les `:` internes
+  sont des séparateurs d'arguments) ; chaque directive est désormais expandue
+  séparément (`%{localtime\:%H}\:%{localtime\:%M}`).
+
 ## [2.7.0] — 2026-11-14
 
 ### Corrigé
