@@ -306,4 +306,6 @@ export interface Catalog {
   visualizers: CatalogOption[]
   layer_types: CatalogOption[]
   code_examples: { label: string; code: string }[]
+  roles?: { id: string; label: string; description: string }[]
+  capabilities?: { id: string; label: string }[]
 }

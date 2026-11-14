@@ -15,6 +15,7 @@ import Scheduling from './pages/Scheduling'
 import Settings from './pages/Settings'
 import SetupWizard from './pages/SetupWizard'
 import Streams from './pages/Streams'
+import Users from './pages/Users'
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, ready } = useAuth()
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="playlists" element={<Playlists />} />
         <Route path="scenes" element={<Scenes />} />
         <Route path="schedule" element={<Scheduling />} />
+        <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

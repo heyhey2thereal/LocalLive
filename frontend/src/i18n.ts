@@ -13,6 +13,7 @@ const fr: Dict = {
   'nav.playlists': 'Playlists',
   'nav.scenes': 'Scènes',
   'nav.schedule': 'Programmation',
+  'nav.users': 'Utilisateurs',
   'nav.settings': 'Paramètres',
   'nav.logout': 'Déconnexion',
   'common.save': 'Enregistrer',
@@ -45,6 +46,7 @@ const fr: Dict = {
   'playlists.title': 'Playlists',
   'scenes.title': 'Scènes',
   'schedule.title': 'Programmation',
+  'users.title': 'Utilisateurs',
   'settings.title': 'Paramètres',
 }
 
@@ -58,6 +60,7 @@ const en: Dict = {
   'nav.playlists': 'Playlists',
   'nav.scenes': 'Scenes',
   'nav.schedule': 'Scheduling',
+  'nav.users': 'Users',
   'nav.settings': 'Settings',
   'nav.logout': 'Log out',
   'common.save': 'Save',
@@ -90,6 +93,7 @@ const en: Dict = {
   'playlists.title': 'Playlists',
   'scenes.title': 'Scenes',
   'schedule.title': 'Scheduling',
+  'users.title': 'Users',
   'settings.title': 'Settings',
 }
 

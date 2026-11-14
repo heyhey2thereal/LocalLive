@@ -6,6 +6,8 @@ export interface CurrentUser {
   id: number
   username: string
   is_admin: boolean
+  role?: string
+  permissions?: string[]
   last_login: string | null
 }
 

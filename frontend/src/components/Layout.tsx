@@ -10,6 +10,7 @@ import {
   IconSettings,
   IconSignal,
   IconStreams,
+  IconUsers,
 } from './icons'
 import { LogoMark } from './Logo'
 import { t } from '../i18n'
@@ -22,6 +23,7 @@ const NAV = [
   { to: '/playlists', label: 'nav.playlists', icon: IconPlaylist },
   { to: '/scenes', label: 'nav.scenes', icon: IconLayers },
   { to: '/schedule', label: 'nav.schedule', icon: IconCalendar },
+  { to: '/users', label: 'nav.users', icon: IconUsers, adminOnly: true },
   { to: '/settings', label: 'nav.settings', icon: IconSettings },
 ]
 
@@ -33,6 +35,7 @@ const TITLES: Record<string, string> = {
   '/playlists': 'playlists.title',
   '/scenes': 'scenes.title',
   '/schedule': 'schedule.title',
+  '/users': 'users.title',
   '/settings': 'settings.title',
 }
 
@@ -56,7 +59,7 @@ export default function Layout() {
             <span className="brand-sub">{channelName}</span>
           </div>
         </div>
-        {NAV.map((item) => {
+        {NAV.filter((item) => !item.adminOnly || user?.is_admin).map((item) => {
           const Icon = item.icon
           return (
             <NavLink
