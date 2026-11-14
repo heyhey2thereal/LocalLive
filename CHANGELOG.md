@@ -23,6 +23,9 @@ Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 - **Suppression groupée de médias** : cases de sélection sur les cartes, barre
   d'action, suppression de plusieurs médias en un clic (`/api/media/bulk-delete`).
 - **Recherche** sur les pages **Scènes** et **Playlists** (filtre instantané).
+- **Éléments de playlist** : boutons **▲ / ▼** pour monter/descendre un élément
+  sans glisser-déposer, et **Dupliquer** un élément (copie juste après, avec ses
+  réglages).
 - **Statistiques de contenu** sur le Tableau de bord : nombre de médias (taille et
   durée cumulée), scènes, playlists, flux (dont actifs), programmes, utilisateurs
   (`/api/system/stats`).
