@@ -4,9 +4,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from .. import db
+from .. import db, fx
 from ..deps import admin_user, current_user, require_installed
 
 router = APIRouter(prefix="/api/playlists", tags=["playlists"])
@@ -22,6 +22,17 @@ class ItemPayload(BaseModel):
     media_id: int | None = None
     scene_id: int | None = None
     duration: float = Field(default=0, ge=0)
+    transition: str | None = None
+    transition_duration: float | None = Field(default=None, ge=0, le=30)
+    background_audio_id: int | None = None
+    background_volume: float | None = Field(default=None, ge=0, le=2)
+
+    @field_validator("transition")
+    @classmethod
+    def valid_transition(cls, v: str | None) -> str | None:
+        if v is not None and v not in fx.TRANSITIONS:
+            raise ValueError(f"Transition invalide : {v}")
+        return v
 
 
 class ReorderPayload(BaseModel):
@@ -39,11 +50,15 @@ def _item_dict(row) -> dict[str, Any]:
 def _load_items(playlist_id: int) -> list[dict[str, Any]]:
     rows = db.query(
         """SELECT pi.id, pi.media_id, pi.scene_id, pi.position, pi.duration,
+                  pi.transition, pi.transition_duration, pi.background_audio_id,
+                  pi.background_volume,
                   m.title AS media_title, m.kind AS media_kind, m.duration AS media_duration,
                   m.thumbnail AS thumbnail, m.path AS media_path,
+                  bg.title AS background_audio_title,
                   s.name AS scene_name
            FROM playlist_items pi
            LEFT JOIN media m ON m.id = pi.media_id
+           LEFT JOIN media bg ON bg.id = pi.background_audio_id
            LEFT JOIN scenes s ON s.id = pi.scene_id
            WHERE pi.playlist_id = ?
            ORDER BY pi.position""",
@@ -54,6 +69,9 @@ def _load_items(playlist_id: int) -> list[dict[str, Any]]:
         d = dict(r)
         effective = d["duration"] or d["media_duration"] or (5 if d["media_kind"] == "image" else 0)
         d["effective_duration"] = round(effective, 3)
+        d["transition"] = d.get("transition") or "cut"
+        d["transition_duration"] = float(d.get("transition_duration") or 0)
+        d["background_volume"] = float(d.get("background_volume") or 0.15)
         if d["thumbnail"]:
             d["thumbnail_url"] = f"/api/media/{d['media_id']}/thumbnail"
         else:
@@ -141,13 +159,23 @@ def add_item(
         "SELECT id FROM scenes WHERE id = ?", (payload.scene_id,)
     ):
         raise HTTPException(status_code=404, detail="Scène introuvable")
+    if payload.background_audio_id is not None and not db.query_one(
+        "SELECT id FROM media WHERE id = ?", (payload.background_audio_id,)
+    ):
+        raise HTTPException(status_code=404, detail="Musique de fond introuvable")
     row = db.query_one(
         "SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM playlist_items WHERE playlist_id = ?",
         (playlist_id,),
     )
     db.execute(
-        "INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration) VALUES(?,?,?,?,?)",
-        (playlist_id, payload.media_id, payload.scene_id, row["pos"], payload.duration),
+        """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
+                                      transition, transition_duration, background_audio_id, background_volume)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        (
+            playlist_id, payload.media_id, payload.scene_id, row["pos"], payload.duration,
+            payload.transition or "cut", payload.transition_duration or 0,
+            payload.background_audio_id, payload.background_volume if payload.background_volume is not None else 0.15,
+        ),
     )
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
@@ -160,7 +188,26 @@ def update_item(
         "SELECT id FROM playlist_items WHERE id = ? AND playlist_id = ?", (item_id, playlist_id)
     ):
         raise HTTPException(status_code=404, detail="Élément introuvable")
-    db.execute("UPDATE playlist_items SET duration = ? WHERE id = ?", (payload.duration, item_id))
+    if payload.background_audio_id is not None and not db.query_one(
+        "SELECT id FROM media WHERE id = ?", (payload.background_audio_id,)
+    ):
+        raise HTTPException(status_code=404, detail="Musique de fond introuvable")
+    fields = ["duration = ?"]
+    values: list[Any] = [payload.duration]
+    if payload.transition is not None:
+        fields.append("transition = ?")
+        values.append(payload.transition)
+    if payload.transition_duration is not None:
+        fields.append("transition_duration = ?")
+        values.append(payload.transition_duration)
+    if payload.background_audio_id is not None:
+        fields.append("background_audio_id = ?")
+        values.append(payload.background_audio_id)
+    if payload.background_volume is not None:
+        fields.append("background_volume = ?")
+        values.append(payload.background_volume)
+    values.append(item_id)
+    db.execute(f"UPDATE playlist_items SET {', '.join(fields)} WHERE id = ?", tuple(values))
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 

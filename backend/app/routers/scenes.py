@@ -7,12 +7,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db
+from .. import db, fx
 from ..deps import admin_user, current_user, require_installed
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
-LAYER_TYPES = {"video", "image", "text", "logo", "overlay"}
+LAYER_TYPES = {"video", "image", "text", "logo", "overlay", "reactive", "code"}
+ANIMATIONS = set(fx.ANIMATIONS)
+VISUALIZERS = set(fx.VISUALIZERS)
 
 
 class Layer(BaseModel):
@@ -24,18 +26,37 @@ class Layer(BaseModel):
     opacity: float = Field(default=1.0, ge=0, le=1)
     visible: bool = True
     z: int = 0
+    rotation: float = 0
     media_id: int | None = None
     text: str | None = None
     font_size: int = 48
     color: str = "#ffffff"
     background: str | None = None
     align: str = "left"
+    animation: str = "none"
+    animation_speed: float | None = None
+    visualizer: str | None = None
+    code: str | None = None
 
     @field_validator("type")
     @classmethod
     def valid_type(cls, v: str) -> str:
         if v not in LAYER_TYPES:
             raise ValueError(f"Type de calque invalide : {v}")
+        return v
+
+    @field_validator("animation")
+    @classmethod
+    def valid_animation(cls, v: str) -> str:
+        if v not in ANIMATIONS:
+            raise ValueError(f"Animation invalide : {v}")
+        return v
+
+    @field_validator("visualizer")
+    @classmethod
+    def valid_visualizer(cls, v: str | None) -> str | None:
+        if v is not None and v not in VISUALIZERS:
+            raise ValueError(f"Visualiseur invalide : {v}")
         return v
 
 

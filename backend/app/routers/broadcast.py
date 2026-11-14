@@ -144,13 +144,12 @@ class RtmpTestPayload(BaseModel):
     key: str | None = None
 
 
-@router.post("/test-rtmp")
-def test_rtmp(payload: RtmpTestPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
-    """Attempt a 2-second handshake with the configured RTMP endpoint."""
-    url = (payload.url or db.get_setting("stream_rtmp_url", "") or "").rstrip("/")
-    key = payload.key if payload.key is not None else (db.get_setting("stream_key", "") or "")
+def probe_rtmp(url: str, key: str) -> dict[str, Any]:
+    """Attempt a 2-second handshake with an RTMP endpoint. Shared by the
+    broadcast test and the per-stream test endpoints."""
+    url = (url or "").rstrip("/")
     if not url:
-        raise HTTPException(status_code=422, detail="URL RTMP manquante")
+        return {"ok": False, "error": "URL RTMP manquante"}
     destination = f"{url}/{key}" if key else url
     cmd = [
         config.FFMPEG_BIN, "-hide_banner", "-loglevel", "error",
@@ -166,6 +165,112 @@ def test_rtmp(payload: RtmpTestPayload, user: dict = Depends(admin_user)) -> dic
     if proc.returncode == 0:
         return {"ok": True, "message": "Connexion RTMP réussie"}
     return {"ok": False, "error": (proc.stderr or "Échec de connexion RTMP")[-400:]}
+
+
+@router.post("/test-rtmp")
+def test_rtmp(payload: RtmpTestPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+    """Attempt a 2-second handshake with the configured RTMP endpoint."""
+    url = payload.url if payload.url is not None else (db.get_setting("stream_rtmp_url", "") or "")
+    key = payload.key if payload.key is not None else (db.get_setting("stream_key", "") or "")
+    return probe_rtmp(url, key)
+
+
+@router.get("/live")
+def live(user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Lightweight payload for frequent polling: engine state + system metrics.
+
+    Deliberately omits storage usage and the fallback playlist name (which cost
+    extra queries) so the dashboard can refresh every couple of seconds without
+    loading the server. Use /status when the full picture is needed.
+    """
+    return {"engine": get_engine().status(), "system": monitor.snapshot()}
+
+
+@router.get("/outputs")
+def outputs(user: dict = Depends(current_user)) -> dict[str, Any]:
+    """List the fan-out destinations: the primary output plus every enabled
+    stream. The primary is read from the live engine when running, otherwise
+    from the broadcast settings, so the list is meaningful before start."""
+    engine = get_engine()
+    state = engine.status()
+    output = state.get("output") or {}
+    kind = output.get("kind") or db.get_setting("output_kind", "rtmp") or "rtmp"
+    if output:
+        destination = output.get("url") or output.get("file_path")
+        width, height = output.get("width"), output.get("height")
+    elif kind == "rtmp":
+        url = (db.get_setting("stream_rtmp_url", "") or "").rstrip("/")
+        key = db.get_setting("stream_key", "") or ""
+        destination = f"{url}/{key}" if key else url
+        width, height = db.get_setting("stream_width"), db.get_setting("stream_height")
+    else:
+        destination = db.get_setting("output_file", "")
+        width, height = db.get_setting("stream_width"), db.get_setting("stream_height")
+    items: list[dict[str, Any]] = [{
+        "id": "primary",
+        "name": db.get_setting("channel_name", "LocalLive") or "LocalLive",
+        "kind": kind,
+        "destination": destination,
+        "width": width,
+        "height": height,
+        "primary": True,
+    }]
+    for row in db.query("SELECT * FROM streams WHERE enabled = 1 ORDER BY name"):
+        items.append({
+            "id": row["id"],
+            "name": row["name"],
+            "kind": row["kind"],
+            "destination": row["rtmp_url"] if row["kind"] == "rtmp" else row["output_file"],
+            "width": row["width"],
+            "height": row["height"],
+            "primary": False,
+        })
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/preview")
+def preview(playlist_id: int | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Preview/Program data for the switcher page.
+
+    `program` is what is on air right now; `preview` is the playlist selected
+    for the next take (its resolved items, without touching the broadcast).
+    """
+    engine = get_engine()
+    program = engine.status()
+    preview_items: list[dict[str, Any]] = []
+    preview_name = ""
+    if playlist_id is None:
+        playlist_id = program.get("playlist_id")
+    if playlist_id:
+        row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+        if row:
+            preview_name = row["name"]
+            preview_items = engine.resolve_preview(int(playlist_id))
+    return {
+        "program": program,
+        "preview": {
+            "playlist_id": playlist_id,
+            "playlist_name": preview_name,
+            "items": preview_items,
+            "duration": round(sum(i.get("duration") or 0 for i in preview_items), 2),
+        },
+        "outputs": outputs(user)["items"],
+    }
+
+
+class TakePayload(BaseModel):
+    playlist_id: int
+
+
+@router.post("/take")
+def take(payload: TakePayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+    """Take a playlist to air (preview -> program)."""
+    if not db.query_one("SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)):
+        raise HTTPException(status_code=404, detail="Playlist introuvable")
+    result = get_engine().switch_playlist(payload.playlist_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Échec de la prise d'antenne"))
+    return result
 
 
 @router.post("/recover")

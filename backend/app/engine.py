@@ -259,6 +259,11 @@ class PlaybackEngine:
             items.append(d)
         return items
 
+    def resolve_preview(self, playlist_id: int) -> list[dict[str, Any]]:
+        """Resolve a playlist to its public item list without touching the
+        broadcast. Used by the Preview/Program switcher."""
+        return [_public_item(i) for i in self._resolve_items(playlist_id)]
+
     def _build_output_config(self, override: dict[str, Any]) -> OutputConfig:
         def get(key: str, default: str) -> str:
             return str(override.get(key, db.get_setting(key, default) or default))
@@ -536,22 +541,24 @@ class PlaybackEngine:
             counter[0] += 1
             return index
 
-        v_norm = (
+        # `fps` is applied *after* `setpts` so every segment presents a valid
+        # constant frame rate to xfade (otherwise it fails with "rate 1/0").
+        v_base = (
             f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,"
-            f"fps={fps},format=yuv420p"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
         )
+        v_tail = f"format=yuv420p,setpts=PTS-STARTPTS,fps={fps}"
         a_norm = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
 
         for n, item in enumerate(items):
             dur = max(item["duration"] or 0, 0.2)
             if item["kind"] == "image":
                 vi = add_input(["-loop", "1", "-t", f"{dur:.3f}", "-i", item["path"]])
-                filters.append(f"[{vi}:v]{v_norm},trim=duration={dur:.3f},setpts=PTS-STARTPTS[v{n}]")
+                filters.append(f"[{vi}:v]{v_base},trim=duration={dur:.3f},{v_tail}[v{n}]")
                 self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
             elif item["kind"] == "audio":
                 vi = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", f"color=c=black:s={w}x{h}:r={fps}"])
-                filters.append(f"[{vi}:v]{v_norm},trim=duration={dur:.3f},setpts=PTS-STARTPTS[v{n}]")
+                filters.append(f"[{vi}:v]{v_base},trim=duration={dur:.3f},{v_tail}[v{n}]")
                 self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
             elif item["kind"] == "scene":
                 self._scene_graph(item, filters, add_input, w, h, fps, font, n)
@@ -559,7 +566,7 @@ class PlaybackEngine:
             else:  # video — reuse the same input for its video and audio streams
                 pre = ["-re"] if realtime else []
                 vi = add_input(pre + ["-i", item["path"]])
-                filters.append(f"[{vi}:v]{v_norm},setpts=PTS-STARTPTS[v{n}]")
+                filters.append(f"[{vi}:v]{v_base},{v_tail}[v{n}]")
                 self._audio_segment(item, filters, add_input, n, dur, a_norm, vi)
 
         # --- assemble segments: cross-fades then background music ------------

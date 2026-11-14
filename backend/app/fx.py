@@ -61,13 +61,14 @@ def escape_drawtext(text: str) -> str:
 def escape_code(code: str) -> str:
     """Sanitise a user-provided FFmpeg filter chain used inside filter_complex.
 
-    We refuse the dangerous structural characters that would let a value escape
-    its own filter node and rewrite the graph: the semicolon (chain separator),
-    the comma (filter separator), square brackets (pad/label syntax) and the
-    newline. Anything else (colons, equals, dots) is valid inside a filter and
-    is left untouched. Whitespace is collapsed to keep the command readable.
+    We remove the characters that would let the value escape its own chain and
+    rewrite the graph: the semicolon (chain separator), the square brackets
+    (input/output labels) and the newline. Commas are kept — they separate the
+    filters of a single chain, which is exactly what a "code" layer is for (e.g.
+    ``hflip,vflip``). Colons and equals are valid filter arguments and untouched.
+    Whitespace is collapsed to keep the command readable.
     """
-    forbidden = "[];,"
+    forbidden = "[];"
     cleaned = "".join(" " if ch in forbidden or ch == "\n" else ch for ch in (code or ""))
     return " ".join(cleaned.split())
 

@@ -20,10 +20,12 @@ from .routers import (
     broadcast,
     folders,
     media,
+    meta,
     playlists,
     scenes,
     schedules,
     setup,
+    streams,
     system,
 )
 
@@ -49,8 +51,10 @@ def create_app() -> FastAPI:
     app.include_router(media.router)
     app.include_router(playlists.router)
     app.include_router(scenes.router)
+    app.include_router(streams.router)
     app.include_router(schedules.router)
     app.include_router(broadcast.router)
+    app.include_router(meta.router)
     app.include_router(system.router)
 
     @app.get("/api/health")
