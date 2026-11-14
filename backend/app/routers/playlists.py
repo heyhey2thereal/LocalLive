@@ -1,0 +1,210 @@
+"""Playlists: CRUD, item ordering, image durations, loop flag."""
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+
+from .. import db
+from ..deps import admin_user, current_user, require_installed
+
+router = APIRouter(prefix="/api/playlists", tags=["playlists"])
+
+
+class PlaylistPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    loop: bool = True
+
+
+class ItemPayload(BaseModel):
+    media_id: int | None = None
+    scene_id: int | None = None
+    duration: float = Field(default=0, ge=0)
+
+
+class ReorderPayload(BaseModel):
+    item_ids: list[int]
+
+
+def _item_dict(row) -> dict[str, Any]:
+    d = dict(row)
+    d["kind"] = d.get("media_kind")
+    d["title"] = d.get("media_title") or d.get("scene_name") or "Élément"
+    d["media_kind"] = d.get("media_kind")
+    return d
+
+
+def _load_items(playlist_id: int) -> list[dict[str, Any]]:
+    rows = db.query(
+        """SELECT pi.id, pi.media_id, pi.scene_id, pi.position, pi.duration,
+                  m.title AS media_title, m.kind AS media_kind, m.duration AS media_duration,
+                  m.thumbnail AS thumbnail, m.path AS media_path,
+                  s.name AS scene_name
+           FROM playlist_items pi
+           LEFT JOIN media m ON m.id = pi.media_id
+           LEFT JOIN scenes s ON s.id = pi.scene_id
+           WHERE pi.playlist_id = ?
+           ORDER BY pi.position""",
+        (playlist_id,),
+    )
+    items = []
+    for r in rows:
+        d = dict(r)
+        effective = d["duration"] or d["media_duration"] or (5 if d["media_kind"] == "image" else 0)
+        d["effective_duration"] = round(effective, 3)
+        if d["thumbnail"]:
+            d["thumbnail_url"] = f"/api/media/{d['media_id']}/thumbnail"
+        else:
+            d["thumbnail_url"] = None
+        items.append(d)
+    return items
+
+
+def _playlist_dict(row) -> dict[str, Any]:
+    items = _load_items(row["id"])
+    total = sum(i["effective_duration"] for i in items)
+    return {
+        **dict(row),
+        "loop": bool(row["loop"]),
+        "items": items,
+        "item_count": len(items),
+        "total_duration": round(total, 3),
+    }
+
+
+@router.get("")
+def list_playlists(user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_installed()
+    rows = db.query("SELECT * FROM playlists ORDER BY name")
+    return {"items": [_playlist_dict(r) for r in rows]}
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+def create_playlist(payload: PlaylistPayload, user: dict = Depends(admin_user)) -> dict[str, Any]:
+    pid = db.execute(
+        "INSERT INTO playlists(name, description, loop) VALUES(?,?,?)",
+        (payload.name.strip(), (payload.description or "").strip() or None, 1 if payload.loop else 0),
+    )
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (pid,)))
+
+
+@router.get("/{playlist_id}")
+def get_playlist(playlist_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Playlist introuvable")
+    return _playlist_dict(row)
+
+
+@router.patch("/{playlist_id}")
+def update_playlist(
+    playlist_id: int, payload: PlaylistPayload, user: dict = Depends(admin_user)
+) -> dict[str, Any]:
+    row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Playlist introuvable")
+    db.execute(
+        "UPDATE playlists SET name = ?, description = ?, loop = ?, updated_at = datetime('now') WHERE id = ?",
+        (
+            payload.name.strip(),
+            (payload.description or "").strip() or None,
+            1 if payload.loop else 0,
+            playlist_id,
+        ),
+    )
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
+
+
+@router.delete("/{playlist_id}")
+def delete_playlist(playlist_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+    if not db.query_one("SELECT id FROM playlists WHERE id = ?", (playlist_id,)):
+        raise HTTPException(status_code=404, detail="Playlist introuvable")
+    db.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+    return {"ok": True}
+
+
+@router.post("/{playlist_id}/items", status_code=201)
+def add_item(
+    playlist_id: int, payload: ItemPayload, user: dict = Depends(admin_user)
+) -> dict[str, Any]:
+    if not db.query_one("SELECT id FROM playlists WHERE id = ?", (playlist_id,)):
+        raise HTTPException(status_code=404, detail="Playlist introuvable")
+    if payload.media_id is None and payload.scene_id is None:
+        raise HTTPException(status_code=422, detail="Un média ou une scène est requis")
+    if payload.media_id is not None and not db.query_one(
+        "SELECT id FROM media WHERE id = ?", (payload.media_id,)
+    ):
+        raise HTTPException(status_code=404, detail="Média introuvable")
+    if payload.scene_id is not None and not db.query_one(
+        "SELECT id FROM scenes WHERE id = ?", (payload.scene_id,)
+    ):
+        raise HTTPException(status_code=404, detail="Scène introuvable")
+    row = db.query_one(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM playlist_items WHERE playlist_id = ?",
+        (playlist_id,),
+    )
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration) VALUES(?,?,?,?,?)",
+        (playlist_id, payload.media_id, payload.scene_id, row["pos"], payload.duration),
+    )
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
+
+
+@router.patch("/{playlist_id}/items/{item_id}")
+def update_item(
+    playlist_id: int, item_id: int, payload: ItemPayload, user: dict = Depends(admin_user)
+) -> dict[str, Any]:
+    if not db.query_one(
+        "SELECT id FROM playlist_items WHERE id = ? AND playlist_id = ?", (item_id, playlist_id)
+    ):
+        raise HTTPException(status_code=404, detail="Élément introuvable")
+    db.execute("UPDATE playlist_items SET duration = ? WHERE id = ?", (payload.duration, item_id))
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
+
+
+@router.delete("/{playlist_id}/items/{item_id}")
+def delete_item(playlist_id: int, item_id: int, user: dict = Depends(admin_user)) -> dict[str, Any]:
+    if not db.query_one(
+        "SELECT id FROM playlist_items WHERE id = ? AND playlist_id = ?", (item_id, playlist_id)
+    ):
+        raise HTTPException(status_code=404, detail="Élément introuvable")
+    db.execute("DELETE FROM playlist_items WHERE id = ?", (item_id,))
+    _resequence(playlist_id)
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
+
+
+@router.post("/{playlist_id}/reorder")
+def reorder(
+    playlist_id: int, payload: ReorderPayload, user: dict = Depends(admin_user)
+) -> dict[str, Any]:
+    existing = {
+        r["id"]
+        for r in db.query("SELECT id FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
+    }
+    if set(payload.item_ids) != existing:
+        raise HTTPException(
+            status_code=422, detail="La liste doit contenir exactement les éléments de la playlist"
+        )
+    with db.connection() as conn:
+        for index, item_id in enumerate(payload.item_ids):
+            conn.execute(
+                "UPDATE playlist_items SET position = ? WHERE id = ? AND playlist_id = ?",
+                (index + 100000, item_id, playlist_id),
+            )
+        for index, item_id in enumerate(payload.item_ids):
+            conn.execute(
+                "UPDATE playlist_items SET position = ? WHERE id = ? AND playlist_id = ?",
+                (index, item_id, playlist_id),
+            )
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
+
+
+def _resequence(playlist_id: int) -> None:
+    rows = db.query(
+        "SELECT id FROM playlist_items WHERE playlist_id = ? ORDER BY position", (playlist_id,)
+    )
+    with db.connection() as conn:
+        for index, r in enumerate(rows):
+            conn.execute("UPDATE playlist_items SET position = ? WHERE id = ?", (index, r["id"]))
