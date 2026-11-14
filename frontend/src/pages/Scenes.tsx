@@ -543,16 +543,28 @@ export default function Scenes() {
                         ))}
                       </select>
                       {layer.media_id && (
-                        <button
-                          className="btn btn-sm"
-                          title="Afficher en plein écran"
-                          onClick={() => {
-                            const m = media.find((x) => x.id === layer.media_id)
-                            if (m) setFullscreenMedia(m)
-                          }}
-                        >
-                          ⛶
-                        </button>
+                        <>
+                          <button
+                            className="btn btn-sm"
+                            title="Étendre sur tout le cadre de la scène"
+                            onClick={() => {
+                              if (!editing) return
+                              updateLayer(selectedLayer!, { x: 0, y: 0, width: editing.width, height: editing.height })
+                            }}
+                          >
+                            Étendre
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            title="Afficher en plein écran"
+                            onClick={() => {
+                              const m = media.find((x) => x.id === layer.media_id)
+                              if (m) setFullscreenMedia(m)
+                            }}
+                          >
+                            ⛶
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

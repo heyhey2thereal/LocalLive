@@ -428,6 +428,20 @@ textarea {
   margin-top: 16px; flex-wrap: wrap;
 }
 .btn-lg { padding: 12px 22px; font-size: 15px; }
+
+/* Visual transitions played on the monitors when taking air */
+.switcher-monitor.tx-fade { animation: txFade 0.8s ease; }
+.switcher-monitor.tx-slide { animation: txSlide 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.switcher-monitor.tx-wipe { animation: txWipe 0.7s ease; }
+.switcher-monitor.tx-circle { animation: txCircle 0.8s ease; }
+.switcher-monitor.tx-zoom { animation: txZoom 0.7s ease; }
+.switcher-monitor.tx-blur { animation: txBlur 0.7s ease; }
+@keyframes txFade { 0% { opacity: 0.1; } 100% { opacity: 1; } }
+@keyframes txSlide { 0% { transform: translateX(28px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes txWipe { 0% { clip-path: inset(0 100% 0 0); } 100% { clip-path: inset(0 0 0 0); } }
+@keyframes txCircle { 0% { clip-path: circle(0% at 50% 50%); } 100% { clip-path: circle(75% at 50% 50%); } }
+@keyframes txZoom { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes txBlur { 0% { filter: blur(12px); opacity: 0.4; } 100% { filter: none; opacity: 1; } }
 @media (max-width: 900px) {
   .switcher-row { grid-template-columns: 1fr; }
   .switcher-arrow { transform: rotate(90deg); padding: 6px 0; }

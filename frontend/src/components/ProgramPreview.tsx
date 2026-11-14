@@ -9,7 +9,7 @@
 // badge instead of being rendered pixel-for-pixel. Chat layers show a live
 // sample of the recent messages.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EngineItem, Media, Scene, SceneLayer } from '../api'
 
 interface SceneLike {
@@ -185,9 +185,15 @@ interface Props {
 }
 
 export default function ProgramPreview({ item, emptyLabel, width, height, sound = false, reloadKey }: Props) {
+  const tileRef = useRef<HTMLDivElement>(null)
+  // Enabling sound is allowed once the user has interacted; the full-screen
+  // button counts as that interaction, so the audio plays right away.
+  const [soundOn, setSoundOn] = useState(sound)
+  useEffect(() => setSoundOn(sound), [sound])
+
   if (!item) {
     return (
-      <div className="program-tile">
+      <div className="program-tile" ref={tileRef}>
         <div className="stage-empty">
           <span>{emptyLabel}</span>
         </div>
@@ -195,15 +201,15 @@ export default function ProgramPreview({ item, emptyLabel, width, height, sound 
     )
   }
   return (
-    <div className="program-tile">
-      <MediaRender item={item} width={width} height={height} sound={sound} reloadKey={reloadKey} />
+    <div className="program-tile" ref={tileRef}>
+      <MediaRender item={item} width={width} height={height} sound={soundOn} reloadKey={reloadKey} />
       <button
         className="program-fullscreen"
-        title="Plein écran"
+        title="Plein écran (avec son)"
         onClick={() => {
-          const el = document.querySelector('.program-tile')
+          setSoundOn(true)
           if (document.fullscreenElement) void document.exitFullscreen()
-          else void (el as HTMLElement | null)?.requestFullscreen?.()
+          else void tileRef.current?.requestFullscreen?.()
         }}
       >
         ⛶

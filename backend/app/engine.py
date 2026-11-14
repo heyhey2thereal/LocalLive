@@ -764,19 +764,30 @@ class PlaybackEngine:
             return True
 
         if ltype == "countdown":
-            # A clock counting down (or up) from `countdown_seconds`, drawn every
-            # frame from the layer start time.
+            # A clock counting down (or up) from `countdown_seconds`. `t` is the
+            # time since the layer went on air, so the timer starts exactly when
+            # the scene reaches the program (no need to pre-set anything).
+            # Formatted MM:SS for readability. No background box by default.
             total = int(layer.get("countdown_seconds") or 60)
             mode = layer.get("countdown_mode") or "down"
-            expr = f"max(0\\,{total}-floor(t))" if mode == "down" else f"{total}+floor(t)"
+            if mode == "down":
+                secs = f"max(0\\,{total}-floor(t))"
+            else:
+                secs = f"{total}+floor(t)"
+            # MM:SS with zero-padding: eif supports a width field (e.g. :d:2).
+            # The literal colon between the two expressions must be escaped so
+            # the filter_complex parser does not treat it as an option separator.
+            expr = f"%{{eif\\:floor(({secs})/60)\\:d\\:2}}\\:%{{eif\\:mod({secs}\\,60)\\:d\\:2}}"
             fontsize = int(layer.get("font_size", 96))
-            text = str(layer.get("text") or "")
-            arg = f"'%{{eif\\:{expr}\\:d}}'"
-            dt = f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
-            if text:
-                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=10"
+            dt = (
+                f"drawtext=text='{expr}':x={prs['x']}:y={prs['y']}:"
+                f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
+            )
             if font:
                 dt += f":fontfile={font}"
+            # A background box only when the layer explicitly asks for one.
+            if layer.get("background"):
+                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
             filters.append(f"{src}{dt}{out_label}")
             return True
 

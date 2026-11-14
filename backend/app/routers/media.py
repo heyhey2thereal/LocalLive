@@ -160,6 +160,11 @@ async def upload(
                 thumb_name if thumb_ok else None, folder_id, (category or None),
             ),
         )
+        # Pre-generate the medium-resolution preview (named after the media id)
+        # so the editor and switcher display it instantly, without a first-request
+        # conversion lag.
+        if kind in ("image", "video"):
+            probe.make_preview(dest, config.PREVIEWS_DIR / f"{media_id}-960.jpg", kind, duration)
         row = db.query_one("SELECT * FROM media WHERE id = ?", (media_id,))
         created.append(_row_to_media(row))
     return {"items": created, "count": len(created)}
@@ -240,7 +245,7 @@ def thumbnail(media_id: int) -> FileResponse:
     path = config.THUMBS_DIR / row["thumbnail"]
     if not path.exists():
         raise HTTPException(status_code=404, detail="Vignette introuvable")
-    return FileResponse(path, media_type="image/jpeg")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/{media_id}/preview")
@@ -264,7 +269,7 @@ def preview(media_id: int, w: int = 960):
         ok = probe.make_preview(src, dest, row["kind"], row["duration"] or 0, width)
         if not ok:
             raise HTTPException(status_code=404, detail="Aperçu indisponible")
-    return FileResponse(dest, media_type="image/jpeg")
+    return FileResponse(dest, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 def _range_stream(path: Path, request: Request, content_type: str) -> StreamingResponse:

@@ -5,11 +5,9 @@ import { useToast } from '../components/ui'
 import {
   IconCpu,
   IconDisk,
-  IconPlay,
   IconRam,
   IconRefresh,
   IconSignal,
-  IconStop,
 } from '../components/icons'
 import { EmptyState, formatBytes, formatDuration, formatUptime, Loading } from '../components/ui'
 
@@ -171,28 +169,11 @@ export default function Dashboard() {
           </div>
 
           <p className="text-sm muted mb-16">
-            La playlist diffusée se choisit dans <strong>Aperçu / Programme</strong>.
+            Le démarrage, l'arrêt et la playlist diffusée se gèrent dans{' '}
+            <strong>Aperçu / Programme</strong>.
           </p>
 
           <div className="flex gap-8 mb-16">
-            {!engine.running ? (
-              <button
-                className="btn btn-primary grow"
-                disabled={busy}
-                onClick={() => act(() => api.post('/api/broadcast/start', {}), 'Diffusion démarrée')}
-                title="Démarre la playlist programmée ou de secours"
-              >
-                <IconPlay size={16} /> Démarrer
-              </button>
-            ) : (
-              <button
-                className="btn btn-danger grow"
-                disabled={busy}
-                onClick={() => act(() => api.post('/api/broadcast/stop'), 'Diffusion arrêtée')}
-              >
-                <IconStop size={16} /> Arrêter
-              </button>
-            )}
             <button
               className="btn"
               disabled={busy || !engine.running}

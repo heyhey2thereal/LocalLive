@@ -26,6 +26,8 @@ export interface MediaInfo {
   id: number
   title: string
   kind: string
+  width?: number | null
+  height?: number | null
   thumbnail_url: string | null
   stream_url?: string
   preview_url?: string
@@ -294,6 +296,16 @@ export default function SceneCanvas({
           // Cached medium-resolution preview loads fast; thumbnail is the fallback.
           const imgSrc = isMedia && m ? m.preview_url ?? m.stream_url ?? m.thumbnail_url : null
           const blur = l.blur ?? 0
+          // Always give the layer an explicit size, even if the stored layer has
+          // none (older scenes): otherwise the image would dictate the box size
+          // and overflow the frame. Missing height is derived from the media's
+          // aspect ratio, or defaults to a 16:9 box.
+          const lw = l.width ?? Math.round(width * 0.25)
+          let lh = l.height ?? 0
+          if (!lh) {
+            const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
+            lh = Math.round(lw * ratio)
+          }
           return (
             <div
               key={i}
@@ -305,8 +317,8 @@ export default function SceneCanvas({
               style={{
                 left: l.x * scale,
                 top: l.y * scale,
-                width: l.width ? l.width * scale : undefined,
-                height: l.height ? l.height * scale : undefined,
+                width: lw * scale,
+                height: lh * scale,
                 opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
                 color: l.color,
                 fontSize: isText || isChat || isCountdown ? (l.font_size ?? 32) * scale : undefined,
