@@ -3,6 +3,29 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.4.0] — 2026-11-14
+
+### Refonte
+- **Aperçu / Programme entièrement repensé** : deux moniteurs identiques côte à
+  côte (même taille, même ligne), une **flèche de transition** entre les deux qui
+  effectue la bascule (le programme devient l'aperçu et inversement), sélecteur de
+  transition dessous, **un seul bouton** pour mettre une playlist à l'antenne, et
+  le contenu de l'aperçu listé en bas.
+
+### Corrigé
+- **Débordement des images** hors du cadre dans les scènes : les calques sont
+  désormais bornés au cadre (plus de débordement en bas).
+- **Images lentes à charger** : aperçus JPEG 960 px mis en cache
+  (`/api/media/{id}/preview`), utilisés par l'éditeur et l'aperçu.
+- **Mise à jour** : le bouton indique clairement quand une action serveur est
+  nécessaire (`update.sh`) au lieu de simuler un succès.
+
+### Ajouté
+- **Guides intelligents type Canva** dans l'éditeur de scènes (bords et centres),
+  désactivés en maintenant **Maj**.
+- **Plein écran** d'une image/vidéo depuis l'éditeur.
+- **Flou** (gblur) réglable par calque.
+
 ## [2.3.0] — 2026-11-14
 
 ### Ajouté

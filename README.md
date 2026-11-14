@@ -79,15 +79,16 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
   change sa taille ; les images ne débordent jamais du cadre.
 
 ### Aperçu / Programme
-- **Switcher type OBS** : moniteurs **Aperçu** et **Programme** côte à côte, rendu
-  réel de la scène (calques) ou du média.
-- Choix de la **transition** de prise d'antenne.
-- **Prise d'antenne** en un clic (bascule de playlist sans couper la diffusion).
-- Gestion des sources (playlists, scènes, médias) directement depuis le switcher.
+- Deux moniteurs **identiques côte à côte** : **Aperçu** (à gauche) et
+  **Programme** (à droite), même taille et même ligne.
+- **Flèche de transition** entre les deux : un clic met l'aperçu à l'antenne et
+  fait basculer l'ancien programme dans l'aperçu.
+- Choix de la **transition** (coupe, fondu, balayage…) sous les moniteurs.
+- **Un seul bouton** pour mettre une playlist à l'antenne ; **contenu de
+  l'aperçu** listé en bas (masquable).
 - **Ouverture du rendu dans une fenêtre séparée** (moniteur déporté) avec
   **plein écran** et **son**.
 - Le rendu se met à jour automatiquement quand la source change.
-- Liste des **sorties actives**.
 
 ### Flux de sortie
 - **Plusieurs destinations simultanées** (fan-out) : YouTube, Twitch, serveur perso…
