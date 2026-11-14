@@ -1,4 +1,49 @@
-# StreamControl — mémoire projet
+# LocalLive — mémoire projet
+
+**Régie de diffusion TV 24/7 auto-hébergée.** Backend **Python + FastAPI +
+SQLite**, moteur **FFmpeg**, frontend **React + TypeScript + Vite**, déploiement
+**Debian 12 + systemd**. Code, UI et commentaires en **français**. Cible :
+2 cœurs Celeron, 8 Go RAM, sans GPU. Construit de zéro le 14/11/2026 (voir
+`2026-11-14.md`).
+
+> NOTE : la section « StreamControl » plus bas appartient à un **autre projet**
+> (Electron/RTMP) et ne concerne pas LocalLive. Ne pas s'y fier ici.
+
+## Architecture
+- `backend/app/` : `main.py` (app FastAPI + service du frontend compilé),
+  `db.py` (sqlite3 stdlib, WAL), `security.py` (scrypt + sessions), `engine.py`
+  (moteur 24/7), `monitor.py` (/proc), `probe.py` (ffprobe + vignettes),
+  `routers/` (setup, auth, media, folders, playlists, scenes, schedules,
+  broadcast, system).
+- Le **moteur est indépendant de l'interface** : thread superviseur + relance
+  auto. Deux pipelines : **copie directe** (`-c copy`, si codec/rés/fps
+  identiques) sinon **graphe de filtres** normalisé (`concat` de segments
+  vidéo+audio normalisés ; images → boucle + silence ; audio → fond noir).
+- Données dans `LOCALLIVE_DATA` (défaut `/var/lib/locallive`, dev `./data`).
+
+## Pièges critiques
+- **FFmpeg lit stdin** : sans `stdin=DEVNULL` + `-nostdin`, un ffmpeg lancé par
+  le serveur en arrière-plan **gèle tout le process** (SIGTTIN). Appliqué à
+  probe.py, engine.py, routers/broadcast.py, routers/setup.py.
+- **Ordre des routeurs** : `/api/media/{id}` masque les routes fixes → les
+  dossiers sont dans `routers/folders.py`, inclus **avant** `media`.
+- **Sandbox** : `/usr/local/bin/python` segfaulte sur asyncio/uvicorn en fin de
+  session ; utiliser `/usr/bin/python3`. `systemd` absent → tester install.sh
+  avec un faux `systemctl` dans le PATH et des chemins `/tmp`.
+
+## Tests
+- `cd backend && python -m pytest ../tests -q` → **47 tests, 0 échec**. Les
+  tests média/moteur génèrent leurs fichiers avec FFmpeg. Chiffres de référence :
+  **47 pytest**. Frontend `npm run build` → ~71 Ko gzip.
+
+## Scripts
+- `install.sh` réexécutable (conserve les données), `update.sh` (backup base
+  avant), `backup.sh` (`--no-media`, `--keep=N`), `uninstall.sh` (`--purge`
+  avec confirmation). Helpers dans `scripts/common.sh` (couleurs, spinners).
+
+---
+
+# StreamControl — mémoire projet (AUTRE PROJET, ne pas confondre)
 
 Régie vidéo **Electron + React + TypeScript** pour sources RTMP, MediaMTX et
 OBS Studio. Code en français, sans accents dans les identifiants ni les chaînes
