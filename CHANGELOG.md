@@ -3,6 +3,30 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.2.0] — 2026-11-14
+
+### Ajouté
+- **Réinitialisation complète** (Paramètres) avec triple confirmation : efface
+  médias, playlists, scènes, flux, dossiers et programmation ; conserve les
+  comptes utilisateurs.
+- **Bouton de mise à jour** dans les Paramètres : vérifie la dernière version
+  publiée, animation de chargement, puis redémarrage (via `update_command`).
+- Calque de scène **chat box** (source + nombre de lignes), alimenté par
+  `/api/chat/{source}`.
+- **Aperçu live** : le rendu se met à jour quand la source change.
+- **Fenêtre déportée** : plein écran et son activable.
+- Gestion des sources (playlists, scènes, médias) regroupée dans Aperçu/Programme.
+
+### Corrigé
+- L'**agrandissement du texte** change bien la taille de police (le texte grandit
+  avec la boîte).
+- **Étirer une image** ne la pixellise plus : le rendu utilise le flux pleine
+  résolution au lieu de la vignette.
+- La liste des scènes affiche un **mini-rendu réel** au lieu d'une icône.
+
+### Modifié
+- **Menu réordonné** : diffusion, puis contenu, puis configuration.
+
 ## [2.1.0] — 2026-11-14
 
 ### Ajouté

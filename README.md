@@ -68,14 +68,21 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - **Animations** : défilement (marquee), compte à rebours, clignotement, pulsation, fondu, glissement.
 - **Rotation**, opacité, ordre (z), visibilité, duplication.
 - **Visualiseurs réactifs** pilotés par l'audio : spectre, oscilloscope, barres, vectorscope.
+- Calque **« chat »** : affiche les derniers messages d'une source (alimentée par
+  `POST /api/chat/<source>`).
 - Calque **« code »** : chaîne de filtres FFmpeg personnalisée (échappée côté serveur).
+- La liste des scènes affiche un **mini-rendu** réel ; redimensionner un texte
+  change sa taille ; les images utilisent la pleine résolution.
 
 ### Aperçu / Programme
 - **Switcher type OBS** : moniteurs **Aperçu** et **Programme** côte à côte, rendu
   réel de la scène (calques) ou du média.
 - Choix de la **transition** de prise d'antenne.
 - **Prise d'antenne** en un clic (bascule de playlist sans couper la diffusion).
-- **Ouverture du rendu dans une fenêtre séparée** (moniteur déporté).
+- Gestion des sources (playlists, scènes, médias) directement depuis le switcher.
+- **Ouverture du rendu dans une fenêtre séparée** (moniteur déporté) avec
+  **plein écran** et **son**.
+- Le rendu se met à jour automatiquement quand la source change.
 - Liste des **sorties actives**.
 
 ### Flux de sortie
@@ -98,6 +105,13 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Réglages : clé de flux, débit, résolution, images/s, préréglage.
 - **Récupération automatique** après erreur de lecture.
 - **Copie directe** (sans réencodage) quand les médias sont compatibles.
+
+### Paramètres
+- Chaîne (nom, fuseau, durée d'image), sécurité (mot de passe), journal serveur.
+- **Bouton de mise à jour** : vérifie la dernière version publiée, affiche une
+  animation de chargement puis redémarre.
+- **Réinitialisation complète** avec **triple confirmation** (résumé, avertissement,
+  saisie de « RESET ») : efface tout le contenu en conservant les comptes.
 
 ---
 
@@ -314,15 +328,15 @@ pip install pytest httpx
 cd backend && python -m pytest ../tests -q
 ```
 
-La suite (**89 tests**) couvre : authentification et assistant, médiathèque
+La suite (**92 tests**) couvre : authentification et assistant, médiathèque
 (import, analyse, vignettes, plages, dossiers), playlists et réordonnancement,
-scènes (calques étendus), programmation, diffusion (démarrage/arrêt, réglages,
-masquage de la clé), métriques système, **effets** (transitions, musique de fond,
-calques réactifs et code, fan-out), **flux de sortie** (CRUD, validation,
-catalogue, aperçu/programme), **utilisateurs et permissions** (rôles, droits,
-garde-fous), la **version/journal**, ainsi que le **moteur FFmpeg réel** (copie
-directe, encodage mixte, transitions, boucle, récupération). Les tests génèrent
-leurs propres médias avec FFmpeg.
+scènes (calques étendus, chat), programmation, diffusion (démarrage/arrêt,
+réglages, masquage de la clé), métriques système, **effets** (transitions,
+musique de fond, calques réactifs et code, fan-out), **flux de sortie** (CRUD,
+validation, catalogue, aperçu/programme), **utilisateurs et permissions**
+(rôles, droits, garde-fous), **réinitialisation**, **version/journal**, ainsi
+que le **moteur FFmpeg réel** (copie directe, encodage mixte, transitions,
+boucle, récupération). Les tests génèrent leurs propres médias avec FFmpeg.
 
 ---
 
