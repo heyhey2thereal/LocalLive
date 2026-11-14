@@ -8,10 +8,12 @@ import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import MediaLibrary from './pages/MediaLibrary'
 import Playlists from './pages/Playlists'
+import PreviewProgram from './pages/PreviewProgram'
 import Scenes from './pages/Scenes'
 import Scheduling from './pages/Scheduling'
 import Settings from './pages/Settings'
 import SetupWizard from './pages/SetupWizard'
+import Streams from './pages/Streams'
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, ready } = useAuth()
@@ -46,6 +48,8 @@ export default function App() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="preview" element={<PreviewProgram />} />
+        <Route path="streams" element={<Streams />} />
         <Route path="media" element={<MediaLibrary />} />
         <Route path="playlists" element={<Playlists />} />
         <Route path="scenes" element={<Scenes />} />
