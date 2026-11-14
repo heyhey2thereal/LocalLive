@@ -264,6 +264,35 @@ def update_item(
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 
+@router.post("/{playlist_id}/items/{item_id}/duplicate", status_code=201)
+def duplicate_item(
+    playlist_id: int, item_id: int, user: dict = Depends(require(permissions.CAP_PLAYLISTS))
+) -> dict[str, Any]:
+    """Insert a copy of an item right after it, with all its settings."""
+    row = db.query_one(
+        "SELECT * FROM playlist_items WHERE id = ? AND playlist_id = ?", (item_id, playlist_id)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Élément introuvable")
+    # Shift the following items down to make room, then insert the copy.
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE playlist_items SET position = position + 1 WHERE playlist_id = ? AND position > ?",
+            (playlist_id, row["position"]),
+        )
+        conn.execute(
+            """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
+                                          transition, transition_duration, background_audio_id, background_volume)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                playlist_id, row["media_id"], row["scene_id"], row["position"] + 1, row["duration"],
+                row["transition"], row["transition_duration"],
+                row["background_audio_id"], row["background_volume"],
+            ),
+        )
+    return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
+
+
 @router.delete("/{playlist_id}/items/{item_id}")
 def delete_item(playlist_id: int, item_id: int, user: dict = Depends(require(permissions.CAP_PLAYLISTS))) -> dict[str, Any]:
     if not db.query_one(

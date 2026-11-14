@@ -186,6 +186,27 @@ export default function Playlists() {
     }
   }
 
+  const reorderIds = async (ids: number[]) => {
+    if (!selected) return
+    try {
+      const pl = await api.post<Playlist>(`/api/playlists/${selected.id}/reorder`, { item_ids: ids })
+      setPlaylists((prev) => prev.map((p) => (p.id === pl.id ? pl : p)))
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Réorganisation impossible', message: err?.message })
+    }
+  }
+
+  // Move an item one position up/down without dragging (touch-friendly).
+  const moveItem = (index: number, delta: -1 | 1) => {
+    if (!selected) return
+    const target = index + delta
+    if (target < 0 || target >= selected.items.length) return
+    const ids = selected.items.map((i) => i.id)
+    const [moved] = ids.splice(index, 1)
+    ids.splice(target, 0, moved)
+    void reorderIds(ids)
+  }
+
   const onDrop = async (targetIndex: number) => {
     if (dragIndex === null || !selected || dragIndex === targetIndex) {
       setDragIndex(null)
@@ -197,12 +218,7 @@ export default function Playlists() {
     ids.splice(targetIndex, 0, moved)
     setDragIndex(null)
     setOverIndex(null)
-    try {
-      const pl = await api.post<Playlist>(`/api/playlists/${selected.id}/reorder`, { item_ids: ids })
-      setPlaylists((prev) => prev.map((p) => (p.id === pl.id ? pl : p)))
-    } catch (err: any) {
-      push({ kind: 'err', title: 'Réorganisation impossible', message: err?.message })
-    }
+    await reorderIds(ids)
   }
 
   if (loading) return <Loading />
@@ -362,8 +378,41 @@ export default function Playlists() {
                         onBlur={(e) => setItemDuration(item, Number(e.target.value))}
                         title="Durée (secondes)"
                       />
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        title="Monter"
+                        disabled={index === 0}
+                        onClick={() => moveItem(index, -1)}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        title="Descendre"
+                        disabled={index === selected.items.length - 1}
+                        onClick={() => moveItem(index, 1)}
+                      >
+                        ▼
+                      </button>
                       <button className="btn btn-ghost btn-icon" title="Transition et musique" onClick={() => openSettings(item)}>
                         <IconTransition size={15} />
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        title="Dupliquer l'élément"
+                        onClick={async () => {
+                          try {
+                            const pl = await api.post<Playlist>(
+                              `/api/playlists/${selected.id}/items/${item.id}/duplicate`,
+                              {},
+                            )
+                            setPlaylists((prev) => prev.map((p) => (p.id === pl.id ? pl : p)))
+                          } catch (err: any) {
+                            push({ kind: 'err', title: 'Duplication impossible', message: err?.message })
+                          }
+                        }}
+                      >
+                        <IconDuplicate size={15} />
                       </button>
                       <button className="btn btn-ghost btn-icon" title="Aperçu" onClick={() => setPreview(item)}>
                         <IconPlay size={15} />

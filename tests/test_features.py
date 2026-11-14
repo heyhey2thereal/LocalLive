@@ -245,3 +245,34 @@ def test_config_import_rejects_bad_file(authed):
 
 def test_config_requires_settings_capability(installed):
     assert installed.get("/api/system/config/export").status_code == 401
+
+
+# --- duplicate / reorder a playlist item -----------------------------------
+def test_duplicate_item_inserts_copy_after(authed):
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid, "duration": 4})
+    item = authed.get(f"/api/playlists/{pid}").json()["items"][0]
+    res = authed.post(f"/api/playlists/{pid}/items/{item['id']}/duplicate", json={})
+    assert res.status_code == 201, res.text
+    items = res.json()["items"]
+    assert len(items) == 2
+    # The copy sits right after the original with the same settings.
+    assert items[1]["duration"] == 4.0
+    assert items[0]["scene_id"] == items[1]["scene_id"]
+
+
+def test_duplicate_item_requires_capability(installed):
+    assert installed.post("/api/playlists/1/items/1/duplicate", json={}).status_code == 401
+
+
+def test_reorder_moves_item(authed):
+    a = authed.post("/api/scenes", json={"name": "A", "layers": []}).json()["id"]
+    b = authed.post("/api/scenes", json={"name": "B", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": a})
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": b})
+    items = authed.get(f"/api/playlists/{pid}").json()["items"]
+    swapped = [items[1]["id"], items[0]["id"]]
+    res = authed.post(f"/api/playlists/{pid}/reorder", json={"item_ids": swapped}).json()
+    assert [i["id"] for i in res["items"]] == swapped
