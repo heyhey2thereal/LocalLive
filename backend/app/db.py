@@ -107,7 +107,42 @@ CREATE TABLE IF NOT EXISTS schedules (
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS streams (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    description   TEXT,
+    tags          TEXT NOT NULL DEFAULT '[]',      -- JSON array of strings
+    privacy       TEXT NOT NULL DEFAULT 'public',  -- public | unlisted | private
+    category      TEXT,
+    encoding      TEXT NOT NULL DEFAULT 'veryfast',  -- ffmpeg preset
+    kind          TEXT NOT NULL DEFAULT 'rtmp',    -- rtmp | file
+    rtmp_url      TEXT,
+    stream_key    TEXT,
+    output_file   TEXT,
+    width         INTEGER NOT NULL DEFAULT 1280,
+    height        INTEGER NOT NULL DEFAULT 720,
+    fps           INTEGER NOT NULL DEFAULT 25,
+    bitrate       INTEGER NOT NULL DEFAULT 2500,
+    audio_bitrate INTEGER NOT NULL DEFAULT 128,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
+
+# Columns added to existing tables by MIGRATIONS (idempotent).
+_MIGRATIONS = [
+    (
+        "playlist_items",
+        {
+            "transition": "TEXT NOT NULL DEFAULT 'cut'",
+            "transition_duration": "REAL NOT NULL DEFAULT 0",
+            "background_audio_id": "INTEGER REFERENCES media(id) ON DELETE SET NULL",
+            "background_volume": "REAL NOT NULL DEFAULT 0.15",
+        },
+    ),
+]
 
 
 def _connect() -> sqlite3.Connection:
@@ -140,7 +175,21 @@ def init_db() -> None:
             return
         with connection() as conn:
             conn.executescript(SCHEMA)
+            _apply_migrations(conn)
         _initialised = True
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the original schema, idempotently.
+
+    SQLite has no IF NOT EXISTS for columns, so we inspect PRAGMA table_info
+    and ALTER TABLE only when the column is missing.
+    """
+    for table, columns in _MIGRATIONS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def query(sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
