@@ -410,6 +410,21 @@ textarea {
   display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;
 }
 .switcher { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.quick-add { position: relative; }
+.quick-add-menu {
+  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: 260px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 6px; max-height: 360px; overflow-y: auto;
+}
+.quick-add-group { margin-bottom: 6px; }
+.quick-add-label { font-size: 11px; text-transform: uppercase; color: var(--text-3); padding: 4px 8px; }
+.quick-add-scroll { max-height: 180px; overflow-y: auto; }
+.quick-add-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 7px 8px; border-radius: 7px; background: transparent; border: none;
+  cursor: pointer; color: var(--text-1); font-family: inherit; font-size: 13px;
+}
+.quick-add-item:hover { background: var(--bg-2); }
 @media (max-width: 900px) { .switcher { grid-template-columns: 1fr; } }
 .switcher-monitor {
   background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius-lg);

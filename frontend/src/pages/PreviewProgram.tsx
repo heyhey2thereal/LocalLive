@@ -7,11 +7,58 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } from '../api'
+import { api, type Catalog, type EngineItem, type Media, type Playlist, type PreviewData, type Scene } from '../api'
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
 import { EmptyState, formatDuration, Loading, useToast } from '../components/ui'
-import { IconLayers, IconMedia, IconPlay, IconPlaylist, IconStreams, IconZap } from '../components/icons'
+import { IconLayers, IconMedia, IconPlay, IconPlaylist, IconPlus, IconStreams, IconZap } from '../components/icons'
+
+// OBS-like quick add: pick a scene or a media and append it to the preview
+// playlist without leaving the switcher.
+function QuickAdd({
+  scenes,
+  media,
+  onScene,
+  onMedia,
+}: {
+  scenes: Scene[]
+  media: Media[]
+  onScene: (id: number) => void
+  onMedia: (id: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="quick-add">
+      <button className="btn btn-sm" onClick={() => setOpen((v) => !v)}>
+        <IconPlus size={14} /> Source
+      </button>
+      {open && (
+        <div className="quick-add-menu" onMouseLeave={() => setOpen(false)}>
+          <div className="quick-add-group">
+            <div className="quick-add-label">Scènes</div>
+            {scenes.map((s) => (
+              <button key={`s${s.id}`} className="quick-add-item" onClick={() => { onScene(s.id); setOpen(false) }}>
+                <IconLayers size={14} /> {s.name}
+              </button>
+            ))}
+            {scenes.length === 0 && <div className="text-sm muted-2">Aucune scène</div>}
+          </div>
+          <div className="quick-add-group">
+            <div className="quick-add-label">Médias</div>
+            <div className="quick-add-scroll">
+              {media.map((m) => (
+                <button key={`m${m.id}`} className="quick-add-item" onClick={() => { onMedia(m.id); setOpen(false) }}>
+                  <IconMedia size={14} /> <span className="truncate">{m.title}</span>
+                </button>
+              ))}
+              {media.length === 0 && <div className="text-sm muted-2">Aucun média</div>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function PreviewProgram() {
   const { push } = useToast()
@@ -22,6 +69,8 @@ export default function PreviewProgram() {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [busy, setBusy] = useState(false)
   const [programIndex, setProgramIndex] = useState(0)
+  const [scenes, setScenes] = useState<Scene[]>([])
+  const [media, setMedia] = useState<Media[]>([])
 
   const poll = usePoll<PreviewData>(
     (signal) =>
@@ -34,12 +83,16 @@ export default function PreviewProgram() {
 
   const loadPlaylists = useCallback(async () => {
     try {
-      const [data, cat] = await Promise.all([
+      const [data, cat, sc, md] = await Promise.all([
         api.get<{ items: Playlist[] }>('/api/playlists'),
         api.get<Catalog>('/api/meta/catalog').catch(() => null),
+        api.get<{ items: Scene[] }>('/api/scenes').catch(() => ({ items: [] })),
+        api.get<{ items: Media[] }>('/api/media').catch(() => ({ items: [] })),
       ])
       setPlaylists(data.items)
       setCatalog(cat)
+      setScenes(sc.items)
+      setMedia(md.items)
     } catch {
       /* ignore */
     }
@@ -94,20 +147,42 @@ export default function PreviewProgram() {
     window.open(`/program?${params.toString()}`, `locallive-${which}`, 'width=960,height=620')
   }
 
+  const addToPreview = async (payload: { scene_id?: number; media_id?: number }) => {
+    const target = selectedId || preview?.playlist_id
+    if (!target) {
+      push({ kind: 'err', title: 'Choisissez d’abord une playlist d’aperçu' })
+      return
+    }
+    try {
+      await api.post(`/api/playlists/${target}/items`, payload)
+      push({ kind: 'ok', title: 'Ajouté à la playlist d’aperçu' })
+      poll.refresh()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Ajout impossible', message: err?.message })
+    }
+  }
+
   if (poll.loading && !program) return <Loading />
 
   return (
     <>
-      {/* Quick actions: everything to manage the sources lives here. */}
+      {/* Quick actions: everything to manage the sources lives here (like OBS). */}
       <div className="switcher-toolbar">
+        <span className="text-sm muted-2 nowrap">Ajouter à l'aperçu :</span>
+        <QuickAdd
+          scenes={scenes}
+          media={media}
+          onScene={(id) => addToPreview({ scene_id: id })}
+          onMedia={(id) => addToPreview({ media_id: id })}
+        />
         <button className="btn btn-sm" onClick={() => navigate('/playlists')}>
-          <IconPlaylist size={15} /> Gérer les playlists
+          <IconPlaylist size={15} /> Playlists
         </button>
         <button className="btn btn-sm" onClick={() => navigate('/scenes')}>
-          <IconLayers size={15} /> Gérer les scènes
+          <IconLayers size={15} /> Scènes
         </button>
         <button className="btn btn-sm" onClick={() => navigate('/media')}>
-          <IconMedia size={15} /> Médiathèque
+          <IconMedia size={15} /> Médias
         </button>
         <div className="grow" />
         {program?.running ? (
