@@ -63,16 +63,20 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 
 ### Éditeur de scènes
 - Canevas interactif : calques déplaçables, **8 poignées de redimensionnement**.
-- **Magnétisme à la grille** (Maj) et ajustement aux flèches (1 px / 10 px).
-- Calques : vidéos, images, textes, logos, bandeaux, **visuels réactifs** et **code FFmpeg**.
-- **Animations** : défilement (marquee), compte à rebours, clignotement, pulsation, fondu, glissement.
-- **Rotation**, opacité, ordre (z), visibilité, duplication.
-- **Visualiseurs réactifs** pilotés par l'audio : spectre, oscilloscope, barres, vectorscope.
-- Calque **« chat »** : affiche les derniers messages d'une source (alimentée par
-  `POST /api/chat/<source>`).
-- Calque **« code »** : chaîne de filtres FFmpeg personnalisée (échappée côté serveur).
+- **Magnétisme à la grille** (Maj), ratio verrouillé (Alt), flèches (1 / 10 px).
+- **Menu déroulant recherchable** pour ajouter un calque, avec **aide intégrée**.
+- Types de calques : **Texte, Image, Vidéo, Chat box, Code FFmpeg, URL web,
+  Compte à rebours, Réactif, Logo, Bandeau**.
+- **Animations IN / LOOP / OUT** combinables : fondu, glissements, zoom, pop,
+  défilement, clignotement, pulsation, **tremblement**, flottement, rotation,
+  respiration, couleurs.
+- **Rotation**, opacité, ordre (z), visibilité, duplication, raccourcis (Ctrl+D,
+  Suppr).
+- **Chat box** : derniers messages d'une source, alimentés par
+  `POST /api/chat/<source>` (voir l'aide du calque).
+- **URL web** : image distante (png/jpg) récupérée par FFmpeg.
 - La liste des scènes affiche un **mini-rendu** réel ; redimensionner un texte
-  change sa taille ; les images utilisent la pleine résolution.
+  change sa taille ; les images ne débordent jamais du cadre.
 
 ### Aperçu / Programme
 - **Switcher type OBS** : moniteurs **Aperçu** et **Programme** côte à côte, rendu
@@ -328,7 +332,7 @@ pip install pytest httpx
 cd backend && python -m pytest ../tests -q
 ```
 
-La suite (**92 tests**) couvre : authentification et assistant, médiathèque
+La suite (**96 tests**) couvre : authentification et assistant, médiathèque
 (import, analyse, vignettes, plages, dossiers), playlists et réordonnancement,
 scènes (calques étendus, chat), programmation, diffusion (démarrage/arrêt,
 réglages, masquage de la clé), métriques système, **effets** (transitions,

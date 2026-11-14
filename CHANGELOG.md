@@ -3,6 +3,32 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.3.0] — 2026-11-14
+
+### Ajouté
+- Éditeur de calques enrichi : **Texte, Image, Vidéo, Chat box, Code FFmpeg,
+  URL web, Compte à rebours, Réactif, Logo, Bandeau**, avec **menu déroulant
+  recherchable** et **aide intégrée** par type.
+- **Animations IN / LOOP / OUT** : entrée (fondu, glissements, zoom, pop),
+  boucle (défilement, clignotement, pulsation, tremblement, flottement,
+  rotation, respiration, couleurs), sortie (fondu, glissements, zoom arrière).
+- **Ajout de source type OBS** dans Aperçu/Programme (scène ou média en un clic).
+- **Plein écran** sur les tuiles image/vidéo ; fenêtre déportée plein écran + son.
+
+### Corrigé
+- La mise à jour n'est proposée que si la version publiée est **réellement plus
+  récente** (comparaison SemVer).
+- Un calque **image ne déborde plus** du cadre (mise à l'échelle + pad).
+- **Chargement rapide** des images (vignette pour les petits rendus, pleine
+  résolution pour les grands).
+- Aperçu à **gauche**, Programme à **droite** (alignés).
+
+### Modifié
+- Tableau de bord : « playlist à diffuser » retiré (renvoi vers Aperçu/Programme).
+- Bouton de déconnexion retravaillé (avatar + rôle + icône).
+- UI **responsive** : barre latérale repliable, grilles adaptatives.
+- Paramètres : mise à jour et réinitialisation (triple confirmation).
+
 ## [2.2.0] — 2026-11-14
 
 ### Ajouté
