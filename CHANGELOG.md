@@ -3,6 +3,32 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.5.0] — 2026-11-14
+
+### Corrigé
+- **Débordement des images** hors du cadre : chaque calque a désormais une taille
+  explicite (hauteur déduite du ratio du média), donc rien ne dépasse plus.
+- **Suppression de scène** : fonctionne (confirmation puis suppression).
+- **Transitions** : un effet visuel réel est joué sur les moniteurs à la prise
+  d'antenne (fondu, glissement, voile, cercle, zoom, flou).
+- **Latence** : l'aperçu et le programme se rafraîchissent toutes les secondes.
+- **Chargement des images** : aperçu 960 px pré-généré à l'import et mis en cache
+  (en-tête `Cache-Control`), affichage quasi instantané.
+- **Compte à rebours** : format MM:SS, sans fond noir, démarre à la mise à
+  l'antenne (le temps part de l'arrivée sur le programme).
+
+### Ajouté
+- Bouton **« Étendre »** sur les images : remplit automatiquement tout le cadre de
+  la scène.
+- **Plein écran avec son** sur le programme (l'audio s'active au clic).
+- Bouton **démarrer/arrêter le direct** sur Aperçu / Programme.
+
+### Modifié
+- **Menu réordonné** : Tableau de bord, Aperçu / Programme, Scènes, Playlists,
+  Flux de sortie, Programmation, Bibliothèque.
+- Les boutons démarrer/arrêter sont retirés du Tableau de bord (renvoi vers
+  Aperçu / Programme).
+
 ## [2.4.0] — 2026-11-14
 
 ### Refonte
