@@ -150,3 +150,14 @@ def test_storage_reporting(authed, sample_media):
 def test_upload_requires_admin(installed, sample_media):
     # Not logged in at all -> 401
     assert _upload(installed, sample_media["video"]).status_code == 401
+
+
+def test_media_preview_endpoint(authed, sample_media):
+    item = _upload(authed, sample_media["image"]).json()["items"][0]
+    assert item["preview_url"] == f"/api/media/{item['id']}/preview"
+    r = authed.get(item["preview_url"])
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/")
+    assert len(r.content) > 0
+    # Cached on the second request.
+    assert authed.get(item["preview_url"]).status_code == 200
