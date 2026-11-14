@@ -113,6 +113,7 @@ install -d -m 0755 "${APP_DIR}/frontend"
 cp -a "${REPO_ROOT}/frontend/." "${APP_DIR}/frontend/" || die "Copie du frontend impossible."
 cp -a "${REPO_ROOT}/scripts" "${APP_DIR}/" 2>/dev/null || true
 cp -f "${REPO_ROOT}/update.sh" "${REPO_ROOT}/backup.sh" "${REPO_ROOT}/uninstall.sh" "${APP_DIR}/" 2>/dev/null || true
+cp -f "${REPO_ROOT}/CHANGELOG.md" "${REPO_ROOT}/VERSION" "${APP_DIR}/" 2>/dev/null || true
 chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}"
 log_ok "Code applicatif installé dans ${APP_DIR}"
 

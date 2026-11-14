@@ -5,10 +5,25 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from .. import config, db, monitor, permissions
+from .. import __version__, config, db, monitor, permissions
 from ..deps import current_user, require
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+@router.get("/version")
+def version_info(user: dict = Depends(current_user)) -> dict[str, Any]:
+    # The changelog sits next to the app (APP_DIR/CHANGELOG.md); FRONTEND_DIST is
+    # APP_DIR/frontend/dist, so its grandparent is the app root.
+    candidates = [
+        config.FRONTEND_DIST.parent.parent / "CHANGELOG.md",
+        config.DATA_DIR.parent / "CHANGELOG.md",
+    ]
+    changelog = ""
+    for candidate in candidates:
+        if candidate.exists():
+            changelog = candidate.read_text(encoding="utf-8", errors="replace")
+            break
+    return {"version": __version__, "changelog": changelog}
 
 
 @router.get("/metrics")

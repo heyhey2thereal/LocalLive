@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { api } from '../api'
 import { useAuth } from '../auth'
+import { Modal } from './ui'
 import {
   IconCalendar,
   IconDashboard,
@@ -43,6 +46,24 @@ export default function Layout() {
   const { user, channelName, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [version, setVersion] = useState('')
+  const [changelog, setChangelog] = useState<string | null>(null)
+
+  useEffect(() => {
+    api
+      .get<{ version: string; changelog: string }>('/api/system/version')
+      .then((d) => setVersion(d.version))
+      .catch(() => {})
+  }, [])
+
+  const showChangelog = async () => {
+    try {
+      const d = await api.get<{ version: string; changelog: string }>('/api/system/version')
+      setChangelog(d.changelog || `Version ${d.version}`)
+    } catch {
+      setChangelog('Journal indisponible')
+    }
+  }
 
   const handleLogout = async () => {
     await logout()
@@ -82,6 +103,9 @@ export default function Layout() {
           <IconLogout size={18} />
           <span>{t('nav.logout')}</span>
         </button>
+        <button className="nav-version" onClick={showChangelog} title="Journal des versions">
+          {version ? `v${version}` : '—'}
+        </button>
       </aside>
       <main className="main">
         <div className="topbar">
@@ -94,6 +118,11 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+      {changelog !== null && (
+        <Modal title={`Journal des versions — v${version}`} onClose={() => setChangelog(null)} wide>
+          <pre className="mono changelog">{changelog}</pre>
+        </Modal>
+      )}
     </div>
   )
 }

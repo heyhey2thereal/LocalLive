@@ -42,6 +42,7 @@ if [[ "${REPO_ROOT}" != "${APP_DIR}" ]]; then
   cp -a "${REPO_ROOT}/frontend/." "${APP_DIR}/frontend/" || die "Copie du frontend impossible."
   cp -a "${REPO_ROOT}/scripts" "${APP_DIR}/" 2>/dev/null || true
   cp -f "${REPO_ROOT}/update.sh" "${REPO_ROOT}/backup.sh" "${REPO_ROOT}/uninstall.sh" "${APP_DIR}/" 2>/dev/null || true
+cp -f "${REPO_ROOT}/CHANGELOG.md" "${REPO_ROOT}/VERSION" "${APP_DIR}/" 2>/dev/null || true
   log_ok "Code mis à jour"
 else
   log_warn "Le dépôt est déjà dans ${APP_DIR} — étape ignorée."

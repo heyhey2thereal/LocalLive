@@ -95,3 +95,9 @@ def test_delete_user(authed):
     uid = authed.post("/api/users", json={"username": "gone", "password": "Password123", "role": "viewer"}).json()["id"]
     assert authed.delete(f"/api/users/{uid}").status_code == 200
     assert all(u["id"] != uid for u in authed.get("/api/users").json()["items"])
+
+
+def test_version_endpoint(authed):
+    data = authed.get("/api/system/version").json()
+    assert data["version"]
+    assert isinstance(data["changelog"], str)
