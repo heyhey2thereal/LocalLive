@@ -260,3 +260,52 @@ def test_scene_layer_animation_rotation_and_validation(authed):
     assert authed.post("/api/scenes", json={
         "name": "S", "layers": [{"type": "reactive", "visualizer": "nope"}],
     }).status_code == 422
+
+
+def test_version_comparison():
+    from app import versioning
+
+    assert versioning.is_newer("2.2.0", "2.1.0") is True
+    assert versioning.is_newer("2.1.0", "2.2.0") is False
+    assert versioning.is_newer("2.2.0", "2.2.0") is False
+    assert versioning.is_newer("v2.10.0", "2.9.9") is True
+    assert versioning.is_newer(None, "1.0.0") is False
+
+
+def test_layer_motion_combines_in_loop_out():
+    from app import fx
+
+    motion = fx.layer_motion(10, 20, anim_in="fade", anim_loop="shake", anim_out="fade", duration=8)
+    # The loop keeps driving the position...
+    assert "sin" in motion["x"]
+    # ...and the alphas are multiplied (fade in * fade out).
+    assert "*" in motion["alpha"]
+    # A static layer has no time dependence.
+    static = fx.layer_motion(5, 6)
+    assert static == {"x": "5", "y": "6", "alpha": "1"}
+
+
+def test_new_layer_types_accepted(authed):
+    scene = {
+        "name": "Rich",
+        "layers": [
+            {"type": "countdown", "countdown_seconds": 30, "countdown_mode": "down"},
+            {"type": "web", "url": "https://example.com/pic.png"},
+            {"type": "chat", "chat_source": "twitch", "chat_lines": 6},
+            {"type": "text", "text": "Hi", "anim_in": "fade", "anim_loop": "pulse", "anim_out": "fade"},
+        ],
+    }
+    r = authed.post("/api/scenes", json=scene)
+    assert r.status_code == 201, r.text
+    layers = r.json()["layers"]
+    assert layers[0]["type"] == "countdown"
+    assert layers[2]["chat_source"] == "twitch"
+
+
+def test_scene_rejects_bad_animations(authed):
+    assert authed.post("/api/scenes", json={
+        "name": "S", "layers": [{"type": "text", "text": "x", "anim_in": "explode"}],
+    }).status_code == 422
+    assert authed.post("/api/scenes", json={
+        "name": "S", "layers": [{"type": "text", "text": "x", "anim_loop": "nope"}],
+    }).status_code == 422

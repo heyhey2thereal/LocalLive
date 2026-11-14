@@ -13,8 +13,14 @@ from .. import permissions
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
-LAYER_TYPES = {"video", "image", "text", "logo", "overlay", "reactive", "code", "chat"}
+LAYER_TYPES = {
+    "video", "image", "text", "logo", "overlay", "reactive", "code", "chat",
+    "countdown", "web",
+}
 ANIMATIONS = set(fx.ANIMATIONS)
+IN_ANIMATIONS = set(fx.IN_ANIMATIONS)
+LOOP_ANIMATIONS = set(fx.LOOP_ANIMATIONS)
+OUT_ANIMATIONS = set(fx.OUT_ANIMATIONS)
 VISUALIZERS = set(fx.VISUALIZERS)
 
 
@@ -34,13 +40,50 @@ class Layer(BaseModel):
     color: str = "#ffffff"
     background: str | None = None
     align: str = "left"
+    # Legacy single animation + the new in/loop/out trio.
     animation: str = "none"
+    anim_in: str = "none"
+    anim_loop: str = "none"
+    anim_out: str = "none"
     animation_speed: float | None = None
     visualizer: str | None = None
     code: str | None = None
     # Chat overlay: a source label (e.g. "Twitch") and a max number of lines.
     chat_source: str | None = None
     chat_lines: int = 8
+    # Countdown layer.
+    countdown_seconds: int = 60
+    countdown_mode: str = "down"
+    # Web/URL layer (image fetched over HTTP).
+    url: str | None = None
+
+    @field_validator("anim_in")
+    @classmethod
+    def valid_anim_in(cls, v: str) -> str:
+        if v not in IN_ANIMATIONS:
+            raise ValueError(f"Animation d'entrée invalide : {v}")
+        return v
+
+    @field_validator("anim_loop")
+    @classmethod
+    def valid_anim_loop(cls, v: str) -> str:
+        if v not in LOOP_ANIMATIONS:
+            raise ValueError(f"Animation de boucle invalide : {v}")
+        return v
+
+    @field_validator("anim_out")
+    @classmethod
+    def valid_anim_out(cls, v: str) -> str:
+        if v not in OUT_ANIMATIONS:
+            raise ValueError(f"Animation de sortie invalide : {v}")
+        return v
+
+    @field_validator("countdown_mode")
+    @classmethod
+    def valid_countdown_mode(cls, v: str) -> str:
+        if v not in ("up", "down"):
+            raise ValueError("Mode de compte à rebours invalide")
+        return v
 
     @field_validator("type")
     @classmethod

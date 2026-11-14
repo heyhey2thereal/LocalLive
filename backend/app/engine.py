@@ -728,35 +728,59 @@ class PlaybackEngine:
         ltype = layer.get("type")
         x, y = int(layer.get("x", 0)), int(layer.get("y", 0))
         opacity = float(layer.get("opacity", 1.0))
-        animation = layer.get("animation") or "none"
         speed = layer.get("animation_speed")
-        prs = fx.animation_exprs(animation, x, y, speed=speed, duration=dur)
+        prs = fx.layer_motion(
+            x, y,
+            anim_in=layer.get("anim_in") or layer.get("animation") or "none",
+            anim_loop=layer.get("anim_loop") or "none",
+            anim_out=layer.get("anim_out") or "none",
+            speed=speed,
+            duration=dur,
+        )
+        color = fx.hex_to_ffmpeg(layer.get("color") or "#ffffff")
+        boxcolor = fx.hex_to_ffmpeg(str(layer.get("background") or "#000000"))
 
-        if ltype == "text" or ltype == "overlay":
-            if not layer.get("text"):
-                return False
-            default_size = 48 if ltype == "text" else 36
-            fontsize = int(layer.get("font_size", default_size))
-            color = fx.hex_to_ffmpeg(layer.get("color") or "#ffffff")
-            text = fx.escape_drawtext(str(layer["text"]))
-            text_arg = f"'{text}'"
+        def draw_text(text: str, fontsize: int, *, box: bool, spacing: int = 0) -> str:
+            arg = f"'{fx.escape_drawtext(text)}'"
             if "text_expr" in prs:
-                text_arg = f"'%{{eif\\:{prs['text_expr']}\\:d}}'"
-            drawtext = (
-                f"drawtext=text={text_arg}:x={prs['x']}:y={prs['y']}:"
+                arg = f"'%{{eif\\:{prs['text_expr']}\\:d}}'"
+            dt = (
+                f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:"
                 f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
             )
+            if spacing:
+                dt += f":line_spacing={spacing}"
             if font:
-                drawtext += f":fontfile={font}"
-            if layer.get("background"):
-                boxcolor = fx.hex_to_ffmpeg(str(layer["background"]))
-                drawtext += f":box=1:boxcolor={boxcolor}@0.6:boxborderw=10"
-            filters.append(f"{src}{drawtext}{out_label}")
+                dt += f":fontfile={font}"
+            if box:
+                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=10"
+            return dt
+
+        if ltype in ("text", "overlay"):
+            if not layer.get("text"):
+                return False
+            fontsize = int(layer.get("font_size", 48 if ltype == "text" else 36))
+            filters.append(f"{src}{draw_text(str(layer['text']), fontsize, box=bool(layer.get('background')))}{out_label}")
+            return True
+
+        if ltype == "countdown":
+            # A clock counting down (or up) from `countdown_seconds`, drawn every
+            # frame from the layer start time.
+            total = int(layer.get("countdown_seconds") or 60)
+            mode = layer.get("countdown_mode") or "down"
+            expr = f"max(0\\,{total}-floor(t))" if mode == "down" else f"{total}+floor(t)"
+            fontsize = int(layer.get("font_size", 96))
+            text = str(layer.get("text") or "")
+            arg = f"'%{{eif\\:{expr}\\:d}}'"
+            dt = f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
+            if text:
+                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=10"
+            if font:
+                dt += f":fontfile={font}"
+            filters.append(f"{src}{dt}{out_label}")
             return True
 
         if ltype == "chat":
-            # Render the most recent messages of the configured source as a
-            # multi-line text block. Empty source -> nothing to draw.
             from . import chat
 
             source = layer.get("chat_source") or "chat"
@@ -765,18 +789,25 @@ class PlaybackEngine:
             if not messages:
                 return False
             text = "\n".join(f"{m['user']}: {m['text']}" for m in messages)
-            default_size = 28
-            fontsize = int(layer.get("font_size", default_size))
-            color = fx.hex_to_ffmpeg(layer.get("color") or "#ffffff")
-            drawtext = (
-                f"drawtext=text='{fx.escape_drawtext(text)}':x={prs['x']}:y={prs['y']}:"
-                f"fontsize={fontsize}:fontcolor={color}:line_spacing=6"
+            fontsize = int(layer.get("font_size", 28))
+            filters.append(f"{src}{draw_text(text, fontsize, box=True, spacing=6)}{out_label}")
+            return True
+
+        if ltype == "web":
+            # Render a web page or image URL. FFmpeg can fetch a still image over
+            # HTTP (png/jpg); true HTML rendering would need a headless browser,
+            # so we document that and fall back to the URL as an image source.
+            url = str(layer.get("url") or "").strip()
+            if not url:
+                return False
+            lw = int(layer.get("width") or w)
+            lh = int(layer.get("height") or h)
+            li = add_input(["-t", f"{dur:.3f}", "-i", url])
+            filters.append(
+                f"[{li}:v]scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
+                f"format=rgba,colorchannelmixer=aa={opacity:.3f}[web{n}_{layer_index}]"
             )
-            if font:
-                drawtext += f":fontfile={font}"
-            boxcolor = fx.hex_to_ffmpeg(str(layer.get("background") or "#000000"))
-            drawtext += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
-            filters.append(f"{src}{drawtext}{out_label}")
+            filters.append(f"{src}[web{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
             return True
 
         if ltype == "code":
@@ -791,13 +822,9 @@ class PlaybackEngine:
             lw = int(layer.get("width") or w)
             lh = int(layer.get("height") or h)
             chain = fx.visualizer_chain(kind, lw, lh, fps)
-            # Drive the visualiser from a dedicated audio source (the item's own
-            # audio is not exposed as a separate label at this stage).
             ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
             filters.append(f"[{ai}:a]aformat=channel_layouts=stereo,{chain}[viz{n}_{layer_index}]")
-            filters.append(
-                f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}"
-            )
+            filters.append(f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
             return True
 
         if ltype in ("video", "image", "logo") and layer.get("media_id"):
@@ -810,8 +837,11 @@ class PlaybackEngine:
                 li = add_input(["-t", f"{dur:.3f}", "-i", media["path"]])
             lw = int(layer.get("width") or w)
             lh = int(layer.get("height") or h)
+            # `force_original_aspect_ratio=decrease` keeps the whole image inside
+            # the box (never overflowing the frame); a transparent pad centres it.
             filters.append(
                 f"[{li}:v]scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
+                f"pad={lw}:{lh}:(ow-iw)/2:(oh-ih)/2:color=#00000000,"
                 f"format=rgba,colorchannelmixer=aa={opacity:.3f}[lyr{n}_{layer_index}]"
             )
             filters.append(f"{src}[lyr{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")

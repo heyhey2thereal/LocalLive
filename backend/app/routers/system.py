@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 import shlex
 import subprocess
 
-from .. import __version__, config, db, monitor, permissions
+from .. import __version__, config, db, monitor, permissions, versioning
 from ..deps import current_user, require
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -37,7 +37,9 @@ def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
                 latest = (json.load(resp).get("tag_name") or "").lstrip("v") or None
         except Exception:
             latest = None
-    available = bool(latest and latest != __version__)
+    # Only offer an update when the published version is genuinely newer, so the
+    # UI never nags when everything is already up to date.
+    available = versioning.is_newer(latest, __version__)
     return {"current": __version__, "latest": latest, "update_available": available, "repo": repo}
 
 
