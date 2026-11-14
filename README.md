@@ -333,7 +333,7 @@ pip install pytest httpx
 cd backend && python -m pytest ../tests -q
 ```
 
-La suite (**98 tests**) couvre : authentification et assistant, médiathèque
+La suite (**100 tests**) couvre : authentification et assistant, médiathèque
 (import, analyse, vignettes, plages, dossiers), playlists et réordonnancement,
 scènes (calques étendus, chat), programmation, diffusion (démarrage/arrêt,
 réglages, masquage de la clé), métriques système, **effets** (transitions,

@@ -130,3 +130,19 @@ def test_update_check_endpoint(authed):
     data = authed.get("/api/system/update/check").json()
     assert data["current"]
     assert "update_available" in data
+
+
+def test_update_check_reports_repo_and_branch(authed):
+    authed.put("/api/broadcast/settings", json={"update_repo": "owner/repo", "update_branch": "main"})
+    data = authed.get("/api/system/update/check").json()
+    assert data["repo"] == "owner/repo"
+    # No network in tests: latest stays null, so no update is offered.
+    assert data["update_available"] is False
+
+
+def test_update_command_missing_returns_manual_hint(authed):
+    # Clear any configured command, then ensure the endpoint reports a manual hint.
+    authed.put("/api/broadcast/settings", json={"update_command": ""})
+    res = authed.post("/api/system/update", json={}).json()
+    assert res["ok"] is False
+    assert res.get("manual") is True
