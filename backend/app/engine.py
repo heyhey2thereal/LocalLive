@@ -24,15 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config, db
+from . import config, db, fx
 
 log = logging.getLogger("locallive.engine")
-
-FONT_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-]
 
 _SILENCE = "anullsrc=channel_layout=stereo:sample_rate=48000"
 
@@ -83,30 +77,13 @@ def _ffmpeg_available() -> bool:
 
 
 def _font_path() -> str | None:
-    for candidate in FONT_CANDIDATES:
-        if Path(candidate).exists():
-            return candidate
-    return None
+    return fx.font_path()
 
 
-def _hex_to_ffmpeg(value: str) -> str:
-    """Accept #rrggbb or rrggbb and return FFmpeg's 0xrrggbb form."""
-    value = value.strip().lstrip("#")
-    if len(value) == 3:
-        value = "".join(c * 2 for c in value)
-    if len(value) != 6:
-        return "0x000000"
-    return f"0x{value}"
-
-
-def _escape_drawtext(text: str) -> str:
-    return (
-        text.replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
-        .replace("%", "\\%")
-        .replace("\n", "\\n")
-    )
+# Kept as thin aliases so the historical helpers remain importable (tests and
+# external callers); the implementations now live in fx.py.
+_hex_to_ffmpeg = fx.hex_to_ffmpeg
+_escape_drawtext = fx.escape_drawtext
 
 
 class PlaybackEngine:
@@ -241,12 +218,16 @@ class PlaybackEngine:
     def _resolve_items(self, playlist_id: int) -> list[dict[str, Any]]:
         rows = db.query(
             """SELECT pi.id, pi.position, pi.duration AS override_duration,
+                      pi.transition, pi.transition_duration,
+                      pi.background_audio_id, pi.background_volume,
                       m.id AS media_id, m.title, m.path, m.kind, m.duration, m.has_audio,
                       m.width, m.height, m.fps, m.video_codec, m.audio_codec, m.thumbnail,
+                      bg.path AS bg_path, bg.duration AS bg_duration,
                       s.id AS scene_id, s.name AS scene_name, s.layers AS scene_layers,
                       s.width AS scene_width, s.height AS scene_height, s.background AS scene_bg
                FROM playlist_items pi
                LEFT JOIN media m ON m.id = pi.media_id
+               LEFT JOIN media bg ON bg.id = pi.background_audio_id
                LEFT JOIN scenes s ON s.id = pi.scene_id
                WHERE pi.playlist_id = ?
                ORDER BY pi.position""",
@@ -270,6 +251,11 @@ class PlaybackEngine:
                     d["duration"] = float(d["duration"] or d["override_duration"] or 0)
                 else:
                     d["duration"] = float(d["duration"] or 0)
+            d["transition"] = d.get("transition") or "cut"
+            d["transition_duration"] = float(d.get("transition_duration") or 0)
+            d["background_volume"] = float(d.get("background_volume") or 0)
+            bg_path = d.get("bg_path")
+            d["background_audio_path"] = bg_path if bg_path and Path(bg_path).exists() else None
             items.append(d)
         return items
 
@@ -425,18 +411,59 @@ class PlaybackEngine:
     # Command construction
     # ------------------------------------------------------------------
     def _build_command(self, items: list[dict[str, Any]], output: OutputConfig) -> tuple[list[str], str]:
+        """Return (ffmpeg command, pipeline). Fan-out happens inside the single
+        process: one input graph, then split/asplit feeding one output each."""
         usable = [i for i in items if i.get("exists") and (i["kind"] != "audio" or i["duration"] > 0)]
         if not usable:
             usable = [i for i in items if i.get("exists")]
-        if self._can_stream_copy(usable):
+        outputs = self._resolve_outputs(output)
+        # Stream copy cannot fan out (split needs decoding) and cannot apply a
+        # transition or background music, so those force the filter pipeline.
+        if len(outputs) == 1 and self._can_stream_copy(usable):
             try:
-                return self._build_copy_command(usable, output), "copy"
+                return self._build_copy_command(usable, outputs[0][0]), "copy"
             except OSError:
                 pass
-        return self._build_filter_command(usable, output), "filter"
+        return self._build_filter_command(usable, outputs), "filter"
+
+    def _resolve_outputs(self, output: OutputConfig) -> list[tuple[OutputConfig, str]]:
+        """Build the list of (config, destination) for the fan-out.
+
+        The configured output is always primary. For an RTMP broadcast we append
+        every enabled row of the `streams` table, so a single engine process can
+        feed several platforms at once.
+        """
+        targets: list[tuple[OutputConfig, str]] = [(output, output.destination)]
+        if output.kind == "rtmp":
+            for row in db.query("SELECT * FROM streams WHERE enabled = 1 AND kind = 'rtmp' ORDER BY id"):
+                key = row["stream_key"] or ""
+                url = (row["rtmp_url"] or "").rstrip("/")
+                dest = f"{url}/{key}" if key else url
+                if not dest or any(dest == d for _, d in targets):
+                    continue
+                targets.append((
+                    OutputConfig(
+                        kind="rtmp",
+                        rtmp_url=url,
+                        stream_key=key,
+                        width=int(row["width"] or output.width),
+                        height=int(row["height"] or output.height),
+                        fps=int(row["fps"] or output.fps),
+                        bitrate=int(row["bitrate"] or output.bitrate),
+                        audio_bitrate=int(row["audio_bitrate"] or output.audio_bitrate),
+                        preset=row["encoding"] or output.preset,
+                        realtime=output.realtime,
+                    ),
+                    dest,
+                ))
+        return targets
 
     def _can_stream_copy(self, items: list[dict[str, Any]]) -> bool:
         if not items or any(i["kind"] != "video" for i in items):
+            return False
+        if any((i.get("transition") or "cut") != "cut" for i in items):
+            return False
+        if any(i.get("background_audio_path") for i in items):
             return False
         first = items[0]
         for item in items:
@@ -476,13 +503,32 @@ class PlaybackEngine:
         Path(output.file_path).parent.mkdir(parents=True, exist_ok=True)
         return ["-f", "mpegts", "-y", output.file_path]
 
-    def _build_filter_command(self, items: list[dict[str, Any]], output: OutputConfig) -> list[str]:
-        w, h, fps = output.width, output.height, output.fps
+    def _encoder_args(self, cfg: OutputConfig) -> list[str]:
+        return [
+            "-c:v", "libx264",
+            "-preset", cfg.preset,
+            "-tune", "zerolatency",
+            "-b:v", f"{cfg.bitrate}k",
+            "-maxrate", f"{cfg.bitrate}k",
+            "-bufsize", f"{cfg.bitrate * 2}k",
+            "-pix_fmt", "yuv420p",
+            "-g", str(cfg.fps * 2),
+            "-keyint_min", str(cfg.fps),
+            "-sc_threshold", "0",
+            "-c:a", "aac",
+            "-b:a", f"{cfg.audio_bitrate}k",
+            "-ar", "48000",
+        ]
+
+    def _build_filter_command(
+        self, items: list[dict[str, Any]], outputs: list[tuple[OutputConfig, str]]
+    ) -> list[str]:
+        w, h, fps = outputs[0][0].width, outputs[0][0].height, outputs[0][0].fps
+        realtime = outputs[0][0].realtime
         inputs: list[str] = []
         filters: list[str] = []
-        concat_refs: list[str] = []
         counter = [0]  # number of -i inputs declared so far
-        font = _font_path()
+        font = fx.font_path()
 
         def add_input(args: list[str]) -> int:
             index = counter[0]
@@ -501,54 +547,142 @@ class PlaybackEngine:
             dur = max(item["duration"] or 0, 0.2)
             if item["kind"] == "image":
                 vi = add_input(["-loop", "1", "-t", f"{dur:.3f}", "-i", item["path"]])
-                ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
                 filters.append(f"[{vi}:v]{v_norm},trim=duration={dur:.3f},setpts=PTS-STARTPTS[v{n}]")
-                filters.append(f"[{ai}:a]anull[a{n}]")
+                self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
             elif item["kind"] == "audio":
-                ai = add_input(["-t", f"{dur:.3f}", "-i", item["path"]])
                 vi = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", f"color=c=black:s={w}x{h}:r={fps}"])
                 filters.append(f"[{vi}:v]{v_norm},trim=duration={dur:.3f},setpts=PTS-STARTPTS[v{n}]")
-                filters.append(f"[{ai}:a]{a_norm},atrim=duration={dur:.3f},asetpts=PTS-STARTPTS[a{n}]")
+                self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
             elif item["kind"] == "scene":
                 self._scene_graph(item, filters, add_input, w, h, fps, font, n)
-                ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
-                filters.append(f"[{ai}:a]anull[a{n}]")
-            else:  # video (single input reused for both streams)
-                pre = ["-re"] if output.realtime else []
+                self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
+            else:  # video — reuse the same input for its video and audio streams
+                pre = ["-re"] if realtime else []
                 vi = add_input(pre + ["-i", item["path"]])
                 filters.append(f"[{vi}:v]{v_norm},setpts=PTS-STARTPTS[v{n}]")
-                if item["has_audio"]:
-                    filters.append(f"[{vi}:a]{a_norm},asetpts=PTS-STARTPTS[a{n}]")
-                else:
-                    ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
-                    filters.append(f"[{ai}:a]anull[a{n}]")
-            concat_refs.append(f"[v{n}][a{n}]")
+                self._audio_segment(item, filters, add_input, n, dur, a_norm, vi)
 
-        n = len(items)
-        filters.append("".join(concat_refs) + f"concat=n={n}:v=1:a=1[outv][outa]")
+        # --- assemble segments: cross-fades then background music ------------
+        video = self._assemble_video(items, filters, len(items))
+        audio = self._assemble_audio(items, filters, len(items))
+        filters.append(f"{video}null[outv]")
+        filters.append(f"{audio}anull[outa]")
+        video_maps, audio_maps = self._fanout_maps(filters, outputs, w, h)
         filter_complex = ";".join(filters)
 
         cmd = [config.FFMPEG_BIN, "-hide_banner", "-nostdin", "-loglevel", "warning"]
         cmd += inputs
-        cmd += ["-filter_complex", filter_complex, "-map", "[outv]", "-map", "[outa]"]
-        cmd += [
-            "-c:v", "libx264",
-            "-preset", output.preset,
-            "-tune", "zerolatency",
-            "-b:v", f"{output.bitrate}k",
-            "-maxrate", f"{output.bitrate}k",
-            "-bufsize", f"{output.bitrate * 2}k",
-            "-pix_fmt", "yuv420p",
-            "-g", str(output.fps * 2),
-            "-keyint_min", str(output.fps),
-            "-sc_threshold", "0",
-            "-c:a", "aac",
-            "-b:a", f"{output.audio_bitrate}k",
-            "-ar", "48000",
-        ]
+        cmd += ["-filter_complex", filter_complex]
+        for i, (cfg, _dest) in enumerate(outputs):
+            cmd += ["-map", video_maps[i], "-map", audio_maps[i]]
+            cmd += self._encoder_args(cfg)
+            cmd += self._output_args(cfg)
         cmd += ["-progress", "pipe:1", "-nostats"]
-        cmd += self._output_args(output)
         return cmd
+
+    def _audio_segment(
+        self, item: dict[str, Any], filters: list[str], add_input,
+        n: int, dur: float, a_norm: str, video_index: int | None,
+    ) -> None:
+        """Emit the [aN] audio label, mixing the background track when present.
+
+        For a video item with sound the audio is read from the same input as the
+        video (`video_index`), avoiding a second decode of the same file.
+        """
+        bg = item.get("background_audio_path")
+        kind = item["kind"]
+        if kind == "video" and item.get("has_audio") and video_index is not None:
+            filters.append(f"[{video_index}:a]{a_norm},asetpts=PTS-STARTPTS[base{n}]")
+        elif kind == "audio":
+            ai = add_input(["-t", f"{dur:.3f}", "-i", item["path"]])
+            filters.append(f"[{ai}:a]{a_norm},atrim=duration={dur:.3f},asetpts=PTS-STARTPTS[base{n}]")
+        else:
+            ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
+            filters.append(f"[{ai}:a]anull[base{n}]")
+
+        if bg:
+            bgi = add_input(["-t", f"{dur:.3f}", "-i", bg])
+            vol = float(item.get("background_volume") or 0.15)
+            filters.append(f"[{bgi}:a]{a_norm},atrim=duration={dur:.3f},asetpts=PTS-STARTPTS,volume={vol:.3f}[bgm{n}]")
+            filters.append(
+                f"[base{n}][bgm{n}]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a{n}]"
+            )
+        else:
+            filters.append(f"[base{n}]anull[a{n}]")
+
+    def _has_transitions(self, items: list[dict[str, Any]]) -> bool:
+        return any(fx.transition_name(i.get("transition") or "cut") for i in items[1:])
+
+    def _assemble_video(self, items: list[dict[str, Any]], filters: list[str], count: int) -> str:
+        """Chain the [vN] segments; return the final video label.
+
+        Without transitions a single `concat` is both cheaper and keeps the
+        timing exact. When at least one transition is configured we fold the
+        segments pairwise so each junction can use its own xfade.
+        """
+        if count == 1:
+            return "[v0]"
+        if not self._has_transitions(items):
+            filters.append("".join(f"[v{n}]" for n in range(count)) + f"concat=n={count}:v=1:a=0[outv0]")
+            return "[outv0]"
+        # The transition stored on an item describes how it *enters* the timeline.
+        current = "[v0]"
+        offset = max(items[0]["duration"] or 0, 0.2)
+        for n in range(1, count):
+            item = items[n]
+            name = fx.transition_name(item.get("transition") or "cut")
+            dur = fx.transition_duration(item.get("transition") or "cut", item.get("transition_duration"))
+            if name and dur > 0:
+                # xfade consumes `dur` seconds of overlap; keep offset >= dur.
+                dur = min(dur, max(offset - 0.05, 0.1), max(items[n]["duration"] or 0.2, 0.1))
+                filters.append(f"{current}[v{n}]xfade=transition={name}:duration={dur:.3f}:offset={offset:.3f}[vx{n}]")
+                current = f"[vx{n}]"
+                offset = offset + max(items[n]["duration"] or 0, 0.2) - dur
+            else:
+                filters.append(f"{current}[v{n}]concat=n=2:v=1:a=0[vx{n}]")
+                current = f"[vx{n}]"
+                offset = offset + max(items[n]["duration"] or 0, 0.2)
+        return current
+
+    def _assemble_audio(self, items: list[dict[str, Any]], filters: list[str], count: int) -> str:
+        """Chain the [aN] segments; return the final audio label."""
+        if count == 1:
+            return "[a0]"
+        if not self._has_transitions(items):
+            filters.append("".join(f"[a{n}]" for n in range(count)) + f"concat=n={count}:v=0:a=1[outa0]")
+            return "[outa0]"
+        current = "[a0]"
+        for n in range(1, count):
+            item = items[n]
+            name = fx.transition_name(item.get("transition") or "cut")
+            dur = fx.transition_duration(item.get("transition") or "cut", item.get("transition_duration"))
+            if name and dur > 0:
+                dur = min(dur, max(items[n]["duration"] or 0.2, 0.1), max(items[n - 1]["duration"] or 0.2, 0.1))
+                filters.append(f"{current}[a{n}]acrossfade=d={dur:.3f}[ax{n}]")
+            else:
+                filters.append(f"{current}[a{n}]concat=n=2:v=0:a=1[ax{n}]")
+            current = f"[ax{n}]"
+        return current
+
+    def _fanout_maps(
+        self, filters: list[str], outputs: list[tuple[OutputConfig, str]], w: int, h: int
+    ) -> tuple[list[str], list[str]]:
+        """Append split/asplit filters for multi-output and return the map labels."""
+        if len(outputs) == 1:
+            return ["[outv]"], ["[outa]"]
+        n = len(outputs)
+        filters.append("[outv]split=" + str(n) + "".join(f"[ov{i}]" for i in range(n)))
+        filters.append("[outa]asplit=" + str(n) + "".join(f"[oa{i}]" for i in range(n)))
+        video_maps: list[str] = []
+        audio_maps: list[str] = []
+        for i, (cfg, _dest) in enumerate(outputs):
+            if int(cfg.width) != w or int(cfg.height) != h:
+                filters.append(f"[ov{i}]scale={int(cfg.width)}:{int(cfg.height)}[ovr{i}]")
+                video_maps.append(f"[ovr{i}]")
+            else:
+                video_maps.append(f"[ov{i}]")
+            audio_maps.append(f"[oa{i}]")
+        return video_maps, audio_maps
 
     def _scene_graph(
         self, item: dict[str, Any], filters: list[str], add_input,
@@ -556,7 +690,7 @@ class PlaybackEngine:
     ) -> None:
         """Compose scene layers onto a background; emits the [vN] video label."""
         dur = max(item["duration"] or 0, 0.2)
-        bg = _hex_to_ffmpeg(item.get("scene_bg") or "#000000")
+        bg = fx.hex_to_ffmpeg(item.get("scene_bg") or "#000000")
         try:
             layers = json.loads(item.get("scene_layers") or "[]")
         except (json.JSONDecodeError, TypeError):
@@ -569,42 +703,88 @@ class PlaybackEngine:
         for layer in sorted(layers, key=lambda l: l.get("z", 0)):
             if not layer.get("visible", True):
                 continue
-            ltype = layer.get("type")
-            x, y = int(layer.get("x", 0)), int(layer.get("y", 0))
-            opacity = float(layer.get("opacity", 1.0))
             out_label = f"[sc{n}_{layer_index}]"
-            if ltype in ("video", "image", "logo") and layer.get("media_id"):
-                media = db.query_one("SELECT path, kind FROM media WHERE id = ?", (layer["media_id"],))
-                if not media or not Path(media["path"]).exists():
-                    continue
-                if media["kind"] == "image":
-                    li = add_input(["-loop", "1", "-t", f"{dur:.3f}", "-i", media["path"]])
-                else:
-                    li = add_input(["-t", f"{dur:.3f}", "-i", media["path"]])
-                lw = int(layer.get("width") or w)
-                lh = int(layer.get("height") or h)
-                filters.append(
-                    f"[{li}:v]scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
-                    f"format=rgba,colorchannelmixer=aa={opacity:.3f}[lyr{n}_{layer_index}]"
-                )
-                filters.append(f"{current}[lyr{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
-                current = out_label
-                layer_index += 1
-            elif ltype in ("text", "overlay") and layer.get("text"):
-                text = _escape_drawtext(str(layer["text"]))
-                default_size = 48 if ltype == "text" else 36
-                fontsize = int(layer.get("font_size", default_size))
-                color = _hex_to_ffmpeg(layer.get("color") or "#ffffff")
-                drawtext = f"drawtext=text='{text}':x={x}:y={y}:fontsize={fontsize}:fontcolor={color}"
-                if font:
-                    drawtext += f":fontfile={font}"
-                if layer.get("background"):
-                    boxcolor = _hex_to_ffmpeg(str(layer["background"]))
-                    drawtext += f":box=1:boxcolor={boxcolor}@0.6:boxborderw=10"
-                filters.append(f"{current}{drawtext}{out_label}")
+            applied = self._layer_overlay(
+                layer, filters, add_input, current, out_label, n, layer_index, dur, w, h, fps, font
+            )
+            if applied:
                 current = out_label
                 layer_index += 1
         filters.append(f"{current}format=yuv420p,fps={fps}[v{n}]")
+
+    def _layer_overlay(
+        self, layer: dict[str, Any], filters: list[str], add_input,
+        src: str, out_label: str, n: int, layer_index: int,
+        dur: float, w: int, h: int, fps: int, font: str | None,
+    ) -> bool:
+        """Apply one scene layer. Returns True when a filter was emitted."""
+        ltype = layer.get("type")
+        x, y = int(layer.get("x", 0)), int(layer.get("y", 0))
+        opacity = float(layer.get("opacity", 1.0))
+        animation = layer.get("animation") or "none"
+        speed = layer.get("animation_speed")
+        prs = fx.animation_exprs(animation, x, y, speed=speed, duration=dur)
+
+        if ltype == "text" or ltype == "overlay":
+            if not layer.get("text"):
+                return False
+            default_size = 48 if ltype == "text" else 36
+            fontsize = int(layer.get("font_size", default_size))
+            color = fx.hex_to_ffmpeg(layer.get("color") or "#ffffff")
+            text = fx.escape_drawtext(str(layer["text"]))
+            text_arg = f"'{text}'"
+            if "text_expr" in prs:
+                text_arg = f"'%{{eif\\:{prs['text_expr']}\\:d}}'"
+            drawtext = (
+                f"drawtext=text={text_arg}:x={prs['x']}:y={prs['y']}:"
+                f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
+            )
+            if font:
+                drawtext += f":fontfile={font}"
+            if layer.get("background"):
+                boxcolor = fx.hex_to_ffmpeg(str(layer["background"]))
+                drawtext += f":box=1:boxcolor={boxcolor}@0.6:boxborderw=10"
+            filters.append(f"{src}{drawtext}{out_label}")
+            return True
+
+        if ltype == "code":
+            code = fx.escape_code(str(layer.get("code") or ""))
+            if not code:
+                return False
+            filters.append(f"{src}{code},format=rgba{out_label}")
+            return True
+
+        if ltype == "reactive":
+            kind = layer.get("visualizer") or "spectrum"
+            lw = int(layer.get("width") or w)
+            lh = int(layer.get("height") or h)
+            chain = fx.visualizer_chain(kind, lw, lh, fps)
+            # Drive the visualiser from the item's own audio.
+            ai = add_input(["-t", f"{dur:.3f}", "-i", _SILENCE])
+            filters.append(f"[{ai}:a]aformat=channel_layouts=stereo,{chain}[viz{n}_{layer_index}]")
+            filters.append(
+                f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:"
+                f"format=auto,colorchannelmixer=aa={opacity:.3f},format=yuv420p{out_label}"
+            )
+            return True
+
+        if ltype in ("video", "image", "logo") and layer.get("media_id"):
+            media = db.query_one("SELECT path, kind FROM media WHERE id = ?", (layer["media_id"],))
+            if not media or not Path(media["path"]).exists():
+                return False
+            if media["kind"] == "image":
+                li = add_input(["-loop", "1", "-t", f"{dur:.3f}", "-i", media["path"]])
+            else:
+                li = add_input(["-t", f"{dur:.3f}", "-i", media["path"]])
+            lw = int(layer.get("width") or w)
+            lh = int(layer.get("height") or h)
+            filters.append(
+                f"[{li}:v]scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
+                f"format=rgba,colorchannelmixer=aa={opacity:.3f}[lyr{n}_{layer_index}]"
+            )
+            filters.append(f"{src}[lyr{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
+            return True
+        return False
 
 
 def _mask(value: str) -> str:
