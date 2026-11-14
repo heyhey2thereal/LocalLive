@@ -13,7 +13,7 @@ from .. import permissions
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
-LAYER_TYPES = {"video", "image", "text", "logo", "overlay", "reactive", "code"}
+LAYER_TYPES = {"video", "image", "text", "logo", "overlay", "reactive", "code", "chat"}
 ANIMATIONS = set(fx.ANIMATIONS)
 VISUALIZERS = set(fx.VISUALIZERS)
 
@@ -38,6 +38,9 @@ class Layer(BaseModel):
     animation_speed: float | None = None
     visualizer: str | None = None
     code: str | None = None
+    # Chat overlay: a source label (e.g. "Twitch") and a max number of lines.
+    chat_source: str | None = None
+    chat_lines: int = 8
 
     @field_validator("type")
     @classmethod

@@ -124,6 +124,7 @@ export type LayerType =
   | 'overlay'
   | 'reactive'
   | 'code'
+  | 'chat'
 
 export interface SceneLayer {
   type: LayerType
@@ -144,6 +145,9 @@ export interface SceneLayer {
   animation_speed?: number | null
   visualizer?: string | null
   code?: string | null
+  // chat layer
+  chat_source?: string | null
+  chat_lines?: number
 }
 
 export interface Scene {

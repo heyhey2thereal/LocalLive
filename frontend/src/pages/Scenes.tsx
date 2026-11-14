@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type Catalog, type LayerType, type Media, type Scene, type SceneLayer } from '../api'
 import SceneCanvas from '../components/SceneCanvas'
+import { SceneThumb } from '../components/ProgramPreview'
 import { ConfirmDialog, EmptyState, Loading, Modal, useToast } from '../components/ui'
 import {
+  IconChat,
   IconCode,
   IconDuplicate,
   IconLayers,
@@ -37,6 +39,8 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => ({
   animation_speed: null,
   visualizer: type === 'reactive' ? 'spectrum' : null,
   code: type === 'code' ? 'hflip' : null,
+  chat_source: type === 'chat' ? 'chat' : null,
+  chat_lines: type === 'chat' ? 8 : undefined,
 })
 
 export default function Scenes() {
@@ -187,7 +191,7 @@ export default function Scenes() {
   if (loading) return <Loading />
 
   const layer = editing && selectedLayer !== null ? editing.layers[selectedLayer] : null
-  const mediaFor = (id?: number | null) => media.find((m) => m.id === id)
+  const mediaFor = (id?: number | null) => media.find((x) => x.id === id)
   const animations = catalog?.animations ?? []
   const visualizers = catalog?.visualizers ?? []
   const codeExamples = catalog?.code_examples ?? []
@@ -212,10 +216,8 @@ export default function Scenes() {
           {scenes.map((s) => (
             <div key={s.id} className="media-card" onClick={() => setEditing({ ...s })}>
               <div className="media-thumb" style={{ background: s.background, aspectRatio: `${s.width}/${s.height}` }}>
-                <div style={{ textAlign: 'center', color: 'var(--text-2)' }}>
-                  <IconLayers size={28} />
-                  <div className="text-sm mt-8">{s.layers.length} calques</div>
-                </div>
+                <SceneThumb scene={s} media={media} />
+                <div className="scene-thumb-badge text-sm">{s.layers.length} calques</div>
               </div>
               <div className="media-body">
                 <div className="media-title">{s.name}</div>
@@ -299,6 +301,9 @@ export default function Scenes() {
                 </button>
                 <button className="btn btn-sm" onClick={() => addLayer('reactive')}>
                   <IconZap size={14} /> Réactif
+                </button>
+                <button className="btn btn-sm" onClick={() => addLayer('chat')}>
+                  <IconChat size={14} /> Chat
                 </button>
                 <button className="btn btn-sm" onClick={() => addLayer('code')}>
                   <IconCode size={14} /> Code
@@ -401,6 +406,7 @@ export default function Scenes() {
                     <option value="video">Vidéo</option>
                     <option value="logo">Logo</option>
                     <option value="reactive">Réactif (audio)</option>
+                    <option value="chat">Chat box</option>
                     <option value="code">Code FFmpeg</option>
                   </select>
                 </div>
@@ -433,6 +439,33 @@ export default function Scenes() {
                   </div>
                 )}
 
+                {layer.type === 'chat' && (
+                  <div className="field" style={{ gridColumn: 'span 3' }}>
+                    <label>Source du chat (Twitch, YouTube, relais…)</label>
+                    <input
+                      className="input mono"
+                      value={layer.chat_source ?? 'chat'}
+                      onChange={(e) => updateLayer(selectedLayer!, { chat_source: e.target.value })}
+                      placeholder="chat"
+                    />
+                    <div className="flex gap-8 items-center mt-8">
+                      <label className="text-sm muted-2">Lignes affichées</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        max={50}
+                        style={{ width: 90 }}
+                        value={layer.chat_lines ?? 8}
+                        onChange={(e) => updateLayer(selectedLayer!, { chat_lines: Number(e.target.value) })}
+                      />
+                    </div>
+                    <span className="hint">
+                      Les messages arrivent via <code className="mono">POST /api/chat/&lt;source&gt;</code>.
+                    </span>
+                  </div>
+                )}
+
                 {layer.type === 'code' && (
                   <div className="field" style={{ gridColumn: 'span 3' }}>
                     <label>Code FFmpeg (filtres séparés par des virgules)</label>
@@ -452,7 +485,7 @@ export default function Scenes() {
                   </div>
                 )}
 
-                {layer.type !== 'text' && layer.type !== 'overlay' && layer.type !== 'code' && layer.type !== 'reactive' && (
+                {layer.type !== 'text' && layer.type !== 'overlay' && layer.type !== 'code' && layer.type !== 'reactive' && layer.type !== 'chat' && (
                   <div className="field">
                     <label>Média</label>
                     <select

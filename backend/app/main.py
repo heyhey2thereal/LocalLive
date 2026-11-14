@@ -18,6 +18,7 @@ from .logging_setup import setup_logging
 from .routers import (
     auth,
     broadcast,
+    chat,
     folders,
     media,
     meta,
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(schedules.router)
     app.include_router(broadcast.router)
     app.include_router(users.router)
+    app.include_router(chat.router)
     app.include_router(meta.router)
     app.include_router(system.router)
 

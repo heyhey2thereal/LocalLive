@@ -1,41 +1,32 @@
-// Read-only renderer for a playlist item, used by the Preview/Program switcher
-// and the pop-out program window. It draws a scene's layers (or a media's
-// video/image) scaled to fit its box, mirroring what the engine sends to air.
+// Read-only renderer for a playlist item, used by the Preview/Program switcher,
+// the pop-out program window and the scene list thumbnails. It draws a scene's
+// layers (or a media's video/image) scaled to fit its box, mirroring what the
+// engine sends to air.
 //
 // This is a faithful *approximation* for the operator (text, images, video,
 // positions, rotations, opacity). Effects that only exist inside FFmpeg
 // (animations, reactive visualisers, code filters) are indicated by a small
-// badge instead of being rendered pixel-for-pixel.
+// badge instead of being rendered pixel-for-pixel. Chat layers show a live
+// sample of the recent messages.
 
 import { useEffect, useState } from 'react'
-import type { EngineItem, Media } from '../api'
+import type { EngineItem, Media, Scene, SceneLayer } from '../api'
 
 interface SceneLike {
   width: number
   height: number
   background: string
-  layers: {
-    type: string
-    x: number
-    y: number
-    width?: number | null
-    height?: number | null
-    opacity?: number
-    visible?: boolean
-    z?: number
-    rotation?: number
-    media_id?: number | null
-    text?: string | null
-    font_size?: number
-    color?: string
-    background?: string | null
-    animation?: string
-    visualizer?: string | null
-    code?: string | null
-  }[]
+  layers: SceneLayer[]
 }
 
-function SceneRender({ scene, media, width }: { scene: SceneLike; media: Media[]; width: number }) {
+function layerBadge(l: SceneLayer): string | null {
+  if (l.type === 'reactive') return `Réactif · ${l.visualizer ?? ''}`
+  if (l.type === 'code') return `Code · ${l.code ?? ''}`
+  if (l.type === 'chat') return `Chat · ${l.chat_source ?? ''}`
+  return null
+}
+
+export function SceneRender({ scene, media, width }: { scene: SceneLike; media: Media[]; width: number }) {
   const scale = width / scene.width
   return (
     <div
@@ -48,6 +39,8 @@ function SceneRender({ scene, media, width }: { scene: SceneLike; media: Media[]
         .map(({ l, i }) => {
           const m = media.find((x) => x.id === l.media_id)
           const isText = l.type === 'text' || l.type === 'overlay'
+          const isChat = l.type === 'chat'
+          const badge = layerBadge(l)
           return (
             <div
               key={i}
@@ -59,19 +52,18 @@ function SceneRender({ scene, media, width }: { scene: SceneLike; media: Media[]
                 height: l.height ? l.height * scale : undefined,
                 opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
                 color: l.color,
-                fontSize: isText ? (l.font_size ?? 32) * scale : undefined,
-                background: isText ? l.background ?? 'transparent' : 'transparent',
-                padding: isText ? '4px 8px' : 0,
+                fontSize: isText || isChat ? (l.font_size ?? 32) * scale : undefined,
+                background: isText || isChat ? l.background ?? 'transparent' : 'transparent',
+                padding: isText || isChat ? '4px 8px' : 0,
                 transform: l.rotation ? `rotate(${l.rotation}deg)` : undefined,
                 zIndex: (l.z ?? 0) + 1,
               }}
             >
-              {!isText && m?.thumbnail_url && <img src={m.thumbnail_url} alt="" />}
-              {!isText && !m?.thumbnail_url && (
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                  {l.type === 'reactive' ? `Réactif · ${l.visualizer ?? ''}` : l.type === 'code' ? `Code · ${l.code ?? ''}` : l.type}
-                </span>
+              {!isText && !isChat && m?.thumbnail_url && <img src={m.thumbnail_url} alt="" />}
+              {!isText && !isChat && !m?.thumbnail_url && badge && (
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{badge}</span>
               )}
+              {isChat && <span style={{ fontSize: 12, color: 'var(--text-2)' }}>💬 {l.chat_source ?? 'chat'}</span>}
               {isText && (l.text || 'Texte')}
             </div>
           )
@@ -80,7 +72,12 @@ function SceneRender({ scene, media, width }: { scene: SceneLike; media: Media[]
   )
 }
 
-function MediaRender({ item, width, height }: { item: EngineItem; width: number; height: number }) {
+// Small thumbnail used in the scene list: renders the scene read-only.
+export function SceneThumb({ scene, media }: { scene: Scene; media: Media[] }) {
+  return <SceneRender scene={scene} media={media} width={220} />
+}
+
+function MediaRender({ item, width, height, sound }: { item: EngineItem; width: number; height: number; sound: boolean }) {
   const [scene, setScene] = useState<SceneLike | null>(null)
   const [media, setMedia] = useState<Media[]>([])
   const [ready, setReady] = useState(false)
@@ -115,7 +112,17 @@ function MediaRender({ item, width, height }: { item: EngineItem; width: number;
     return <img src={item.stream_url} alt={item.title} style={{ maxWidth: width, maxHeight: height }} />
   }
   if (item.kind === 'video' && item.stream_url) {
-    return <video src={item.stream_url} style={{ maxWidth: width, maxHeight: height }} muted autoPlay loop playsInline />
+    return (
+      <video
+        src={item.stream_url}
+        style={{ maxWidth: width, maxHeight: height }}
+        muted={!sound}
+        autoPlay
+        loop
+        playsInline
+        controls={sound}
+      />
+    )
   }
   if (item.kind === 'audio') {
     return (
@@ -133,9 +140,10 @@ interface Props {
   emptyLabel: string
   width: number
   height: number
+  sound?: boolean
 }
 
-export default function ProgramPreview({ item, emptyLabel, width, height }: Props) {
+export default function ProgramPreview({ item, emptyLabel, width, height, sound = false }: Props) {
   if (!item) {
     return (
       <div className="program-tile">
@@ -147,7 +155,7 @@ export default function ProgramPreview({ item, emptyLabel, width, height }: Prop
   }
   return (
     <div className="program-tile">
-      <MediaRender item={item} width={width} height={height} />
+      <MediaRender item={item} width={width} height={height} sound={sound} />
     </div>
   )
 }

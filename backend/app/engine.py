@@ -754,6 +754,31 @@ class PlaybackEngine:
             filters.append(f"{src}{drawtext}{out_label}")
             return True
 
+        if ltype == "chat":
+            # Render the most recent messages of the configured source as a
+            # multi-line text block. Empty source -> nothing to draw.
+            from . import chat
+
+            source = layer.get("chat_source") or "chat"
+            lines = int(layer.get("chat_lines") or 8)
+            messages = chat.recent(source, lines)
+            if not messages:
+                return False
+            text = "\n".join(f"{m['user']}: {m['text']}" for m in messages)
+            default_size = 28
+            fontsize = int(layer.get("font_size", default_size))
+            color = fx.hex_to_ffmpeg(layer.get("color") or "#ffffff")
+            drawtext = (
+                f"drawtext=text='{fx.escape_drawtext(text)}':x={prs['x']}:y={prs['y']}:"
+                f"fontsize={fontsize}:fontcolor={color}:line_spacing=6"
+            )
+            if font:
+                drawtext += f":fontfile={font}"
+            boxcolor = fx.hex_to_ffmpeg(str(layer.get("background") or "#000000"))
+            drawtext += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
+            filters.append(f"{src}{drawtext}{out_label}")
+            return True
+
         if ltype == "code":
             code = fx.escape_code(str(layer.get("code") or ""))
             if not code:

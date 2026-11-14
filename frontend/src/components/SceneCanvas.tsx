@@ -5,9 +5,9 @@
 // ratio, and the arrow keys nudge the selected layer (1px, or 10px with Shift).
 // Everything works in scene coordinates and is scaled to the displayed width.
 //
-// A resize starts from the layer's *measured* on-screen size (not from a
-// hard-coded default), so layers that have no explicit width/height — such as
-// text — resize smoothly instead of collapsing to a sliver.
+// Resizing a text layer scales its font size with the box (so "enlarging" text
+// actually enlarges the text), and images are drawn from their full-resolution
+// stream rather than the low-resolution thumbnail so stretching keeps quality.
 
 import { useCallback, useEffect, useRef } from 'react'
 import type { SceneLayer } from '../api'
@@ -17,6 +17,15 @@ type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 const GRID = 10
 const MIN_SIZE = 8
+const MIN_FONT = 8
+
+export interface MediaInfo {
+  id: number
+  title: string
+  kind: string
+  thumbnail_url: string | null
+  stream_url?: string
+}
 
 interface Props {
   width: number
@@ -25,7 +34,7 @@ interface Props {
   layers: SceneLayer[]
   selected: number | null
   displayWidth: number
-  mediaFor: (id?: number | null) => { thumbnail_url: string | null; title: string } | undefined
+  mediaFor: (id?: number | null) => MediaInfo | undefined
   onSelect: (index: number | null) => void
   onChange: (layers: SceneLayer[]) => void
 }
@@ -55,6 +64,8 @@ export default function SceneCanvas({
     orig: SceneLayer
     baseW: number
     baseH: number
+    baseFont: number
+    isText: boolean
   } | null>(null)
 
   const patchLayer = useCallback(
@@ -91,11 +102,12 @@ export default function SceneCanvas({
     e.stopPropagation()
     onSelect(index)
     const layer = layers[index]
-    // Measure the real rendered size so resizing starts from what the user sees.
+    const isText = layer.type === 'text' || layer.type === 'overlay'
     const el = layerRefs.current.get(index)
     const rect = el?.getBoundingClientRect()
     const baseW = rect && rect.width > 0 ? rect.width / scale : layer.width ?? 200
     const baseH = rect && rect.height > 0 ? rect.height / scale : layer.height ?? 100
+    const baseFont = layer.font_size ?? (layer.type === 'text' ? 48 : 36)
     drag.current = {
       index,
       handle,
@@ -104,6 +116,8 @@ export default function SceneCanvas({
       orig: { ...layer },
       baseW,
       baseH,
+      baseFont,
+      isText,
     }
     const onMove = (ev: MouseEvent) => {
       const d = drag.current
@@ -134,7 +148,6 @@ export default function SceneCanvas({
         h = d.baseH - dy
       }
       if (hnd.includes('s')) h = d.baseH + dy
-      // Clamp to the minimum size, keeping the anchored edge fixed.
       if (w < MIN_SIZE) {
         if (hnd.includes('w')) x = d.orig.x + (d.baseW - MIN_SIZE)
         w = MIN_SIZE
@@ -143,18 +156,23 @@ export default function SceneCanvas({
         if (hnd.includes('n')) y = d.orig.y + (d.baseH - MIN_SIZE)
         h = MIN_SIZE
       }
-      // Alt locks the aspect ratio on the corner handles.
       if (alt && hnd.length === 2 && d.baseW > 0 && d.baseH > 0) {
         const ratio = d.baseW / d.baseH
         h = w / ratio
         if (hnd.includes('n')) y = d.orig.y + (d.baseH - h)
       }
-      patchLayer(d.index, {
+      const patch: Partial<SceneLayer> = {
         x: snap(x, shift),
         y: snap(y, shift),
         width: snap(w, shift),
         height: snap(h, shift),
-      })
+      }
+      // Text layers scale their font with the box so "enlarging" the box really
+      // enlarges the text (otherwise the box grows but the glyphs stay small).
+      if (d.isText && d.baseH > 0) {
+        patch.font_size = Math.max(MIN_FONT, Math.round((d.baseFont * h) / d.baseH))
+      }
+      patchLayer(d.index, patch)
     }
     const onUp = () => {
       drag.current = null
@@ -179,6 +197,10 @@ export default function SceneCanvas({
           const isText = l.type === 'text' || l.type === 'overlay'
           const isCode = l.type === 'code'
           const isReactive = l.type === 'reactive'
+          const isChat = l.type === 'chat'
+          // Prefer the full-resolution stream for stills so stretching keeps
+          // quality; fall back to the thumbnail.
+          const imgSrc = m ? m.stream_url ?? m.thumbnail_url : null
           return (
             <div
               key={i}
@@ -203,12 +225,19 @@ export default function SceneCanvas({
               onMouseDown={(e) => startDrag(e, i, 'move')}
               onClick={(e) => e.stopPropagation()}
             >
-              {!isText && m?.thumbnail_url && <img src={m.thumbnail_url} alt="" draggable={false} />}
-              {!isText && !m?.thumbnail_url && (
+              {!isText && !isCode && !isReactive && !isChat && imgSrc && (
+                <img src={imgSrc} alt="" draggable={false} />
+              )}
+              {!isText && !isCode && !isReactive && !isChat && !imgSrc && (
                 <span style={{ color: 'var(--text-3)', fontSize: 12 }}>
-                  {isCode ? 'Code' : isReactive ? 'Réactif' : l.type === 'logo' ? 'Logo' : 'Média'}
+                  {l.type === 'logo' ? 'Logo' : 'Média'}
                 </span>
               )}
+              {isReactive && (
+                <span style={{ color: 'var(--text-3)', fontSize: 12 }}>Réactif · {l.visualizer}</span>
+              )}
+              {isCode && <span style={{ color: 'var(--text-3)', fontSize: 12 }}>Code</span>}
+              {isChat && <span style={{ color: 'var(--text-3)', fontSize: 12 }}>Chat</span>}
               {isText && (l.text || 'Texte')}
               {selected === i &&
                 HANDLES.map((h) => (

@@ -628,6 +628,11 @@ textarea {
   .scene-editor { grid-template-columns: 1fr; }
 }
 .scene-canvas { position: relative; background: #000; overflow: hidden; }
+.scene-thumb-badge {
+  position: absolute; bottom: 6px; right: 8px; z-index: 3;
+  background: rgba(11, 13, 18, 0.75); color: var(--text-2);
+  padding: 2px 8px; border-radius: 999px; font-size: 11px;
+}
 .scene-layer {
   position: absolute; border: 1px solid transparent; cursor: move;
   display: flex; align-items: center; justify-content: center;

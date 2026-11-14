@@ -31,6 +31,7 @@ def catalog(user: dict = Depends(current_user)) -> dict[str, Any]:
             {"id": "video", "label": "Vidéo"},
             {"id": "logo", "label": "Logo"},
             {"id": "reactive", "label": "Réactif (audio)"},
+            {"id": "chat", "label": "Chat box"},
             {"id": "code", "label": "Code FFmpeg"},
         ],
         "code_examples": [
