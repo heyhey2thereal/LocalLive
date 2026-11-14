@@ -171,6 +171,9 @@ LOCALLIVE_DATA=${DATA_DIR}
 LOCALLIVE_FRONTEND=${APP_DIR}/frontend/dist
 LOCALLIVE_HOST=${APP_HOST}
 LOCALLIVE_PORT=${APP_PORT}
+# Mise à jour depuis l'interface : dépôt git et branche à suivre.
+LOCALLIVE_UPDATE_REPO=${UPDATE_REPO:-}
+LOCALLIVE_UPDATE_BRANCH=${UPDATE_BRANCH:-main}
 EOF
   # The service runs as APP_USER, so the file must be readable by APP_GROUP:
   # root:APP_GROUP with mode 0640 (readable by the service, not world-readable).
@@ -183,6 +186,22 @@ else
   chmod 0640 "${CONF_DIR}/locallive.env" 2>/dev/null || true
   log_ok "Fichier de configuration conservé"
 fi
+
+# Self-update helper: a small root-owned script the service user may run through
+# sudo, so the "Mettre à jour" button can actually pull the latest code.
+install -d -m 0755 /usr/local/sbin
+install -m 0755 "${REPO_ROOT}/scripts/locallive-update" /usr/local/sbin/locallive-update
+cat >"/etc/sudoers.d/locallive-update" <<EOF
+# Allow the LocalLive service user to run the updater without a password.
+${APP_USER} ALL=(root) NOPASSWD: /usr/local/sbin/locallive-update
+EOF
+chmod 0440 "/etc/sudoers.d/locallive-update"
+log_ok "Programme de mise à jour installé (/usr/local/sbin/locallive-update)"
+
+# Tell the application which command to run for updates.
+env LOCALLIVE_DATA="${DATA_DIR}" "${VENV_DIR}/bin/python" -c \
+  "import sys; sys.path.insert(0, '${APP_DIR}/backend'); from app import db; db.set_setting('update_command', 'sudo /usr/local/sbin/locallive-update')" \
+  2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 9. systemd service

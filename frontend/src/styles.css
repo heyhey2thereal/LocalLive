@@ -58,6 +58,10 @@ body {
   font-family: var(--font);
   font-size: 14px;
   line-height: 1.5;
+  /* No text selection anywhere except where explicitly allowed (inputs, code,
+     error messages). This stops accidental highlighting while dragging. */
+  user-select: none;
+  -webkit-user-select: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -83,6 +87,24 @@ select,
 textarea {
   font-family: inherit;
   font-size: inherit;
+}
+
+/* Allow selecting text where it is genuinely useful. */
+input,
+textarea,
+pre,
+code,
+.mono,
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Images and layers must never be draggable (the editor handles movement). */
+img,
+video {
+  -webkit-user-drag: none;
+  user-drag: none;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -476,8 +498,14 @@ textarea {
 .program-tile {
   position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius);
   border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center;
+  width: 100%;
 }
 .program-tile .scene-canvas { max-width: 100%; }
+/* Fills its parent box exactly: the scene is measured and drawn at that size, so
+   a big image can never push the monitor wider/taller. */
+.fit-scene { width: 100%; height: 100%; display: grid; place-items: center; overflow: hidden; }
+.fit-scene .scene-canvas { max-width: 100%; max-height: 100%; }
+.fit-media { width: 100%; height: 100%; object-fit: contain; display: block; }
 .program-fullscreen {
   position: absolute; top: 8px; right: 8px; z-index: 6;
   width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
@@ -539,6 +567,15 @@ textarea {
   position: relative;
 }
 .media-card:hover { transform: translateY(-3px); border-color: var(--accent-line); box-shadow: var(--shadow); }
+/* Always-clickable delete button on the top-right corner of a card. */
+.card-delete {
+  position: absolute; top: 8px; right: 8px; z-index: 5;
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  display: grid; place-items: center; color: #fff;
+  background: rgba(11, 13, 18, 0.72); border: 1px solid var(--line);
+  opacity: 0.85; transition: opacity 0.15s ease, background 0.15s ease;
+}
+.card-delete:hover { opacity: 1; background: var(--red); border-color: var(--red); }
 .media-thumb {
   aspect-ratio: 16 / 9;
   background: #05070a;

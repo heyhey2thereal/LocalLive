@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# LocalLive self-updater, installed as /usr/local/sbin/locallive-update.
+#
+# Pulls the latest code from the configured git repository and runs update.sh
+# from that fresh checkout. Intended to be run by the service user through a
+# restricted sudoers rule (see install.sh). Prints a short status and exits
+# non-zero on failure.
+
+set -uo pipefail
+
+APP_DIR="${APP_DIR:-/opt/locallive}"
+DATA_DIR="${DATA_DIR:-/var/lib/locallive}"
+CONF_DIR="${CONF_DIR:-/etc/locallive}"
+SRC_DIR="${SRC_DIR:-${DATA_DIR}/update-src}"
+
+# Read LOCALLIVE_UPDATE_REPO / LOCALLIVE_UPDATE_BRANCH from the env file if set.
+if [[ -f "${CONF_DIR}/locallive.env" ]]; then
+  # shellcheck disable=SC1090
+  source "${CONF_DIR}/locallive.env"
+fi
+REPO="${LOCALLIVE_UPDATE_REPO:-}"
+BRANCH="${LOCALLIVE_UPDATE_BRANCH:-main}"
+
+if [[ -z "${REPO}" ]]; then
+  echo "Aucun dépôt de mise à jour configuré (LOCALLIVE_UPDATE_REPO)." >&2
+  exit 3
+fi
+
+echo "==> Mise à jour depuis ${REPO} (branche ${BRANCH})"
+command -v git >/dev/null 2>&1 || { echo "git est requis." >&2; exit 4; }
+
+if [[ -d "${SRC_DIR}/.git" ]]; then
+  git -C "${SRC_DIR}" fetch --depth 1 origin "${BRANCH}" || exit 5
+  git -C "${SRC_DIR}" reset --hard FETCH_HEAD || exit 5
+else
+  rm -rf "${SRC_DIR}"
+  git clone --depth 1 --branch "${BRANCH}" "${REPO}" "${SRC_DIR}" || exit 5
+fi
+
+if [[ ! -x "${SRC_DIR}/update.sh" ]]; then
+  echo "update.sh introuvable dans le dépôt." >&2
+  exit 6
+fi
+
+echo "==> Application de la mise à jour"
+# update.sh performs the backup, code copy, dependency install, frontend build
+# and service restart, and verifies the service came back up.
+APP_DIR="${APP_DIR}" DATA_DIR="${DATA_DIR}" CONF_DIR="${CONF_DIR}" \
+  bash "${SRC_DIR}/update.sh"

@@ -22,7 +22,13 @@ def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
     release tag is read from the public GitHub API. Without it we simply report
     the running version and that no source is configured.
     """
-    repo = db.get_setting("update_repo", "") or ""
+    import os
+
+    repo = (db.get_setting("update_repo", "") or "").strip()
+    if not repo:
+        # Fall back to the host configuration (set by install.sh) if present.
+        env = os.environ.get("LOCALLIVE_UPDATE_REPO", "").strip()
+        repo = env
     latest = None
     if repo:
         import json

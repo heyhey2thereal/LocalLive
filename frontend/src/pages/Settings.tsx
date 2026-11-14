@@ -49,6 +49,20 @@ export default function Settings() {
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'updating' | 'done'>('idle')
   const [updateMsg, setUpdateMsg] = useState('')
   const [updateCheck, setUpdateCheck] = useState<{ current: string; latest: string | null; update_available: boolean } | null>(null)
+  const [updateRepo, setUpdateRepo] = useState('')
+  const [updateBranch, setUpdateBranch] = useState('main')
+  const [savingUpdate, setSavingUpdate] = useState(false)
+
+  const checkUpdate = useCallback(async () => {
+    try {
+      const data = await api.get<{ current: string; latest: string | null; update_available: boolean; repo: string }>(
+        '/api/system/update/check',
+      )
+      setUpdateCheck(data)
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -63,16 +77,28 @@ export default function Settings() {
       setLogs(l.lines)
       setFfmpeg(f)
       setVersion(v)
+      setUpdateRepo(s.update_repo ?? '')
+      setUpdateBranch(s.update_branch ?? 'main')
     } catch (err: any) {
       push({ kind: 'err', title: 'Chargement impossible', message: err?.message })
     } finally {
       setLoading(false)
     }
-    api
-      .get<{ current: string; latest: string | null; update_available: boolean }>('/api/system/update/check')
-      .then(setUpdateCheck)
-      .catch(() => {})
-  }, [push])
+    void checkUpdate()
+  }, [push, checkUpdate])
+
+  const saveUpdateConfig = async () => {
+    setSavingUpdate(true)
+    try {
+      await api.put('/api/broadcast/settings', { update_repo: updateRepo, update_branch: updateBranch })
+      push({ kind: 'ok', title: 'Configuration de mise à jour enregistrée' })
+      await checkUpdate()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Enregistrement impossible', message: err?.message })
+    } finally {
+      setSavingUpdate(false)
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -222,6 +248,11 @@ export default function Settings() {
           <div className="card mb-16">
             <div className="card-head">
               <span className="card-title">Mise à jour</span>
+              {updateCheck && (
+                <span className={`badge ${updateCheck.update_available ? 'badge-warn' : 'badge-ok'}`}>
+                  {updateCheck.update_available ? 'Mise à jour disponible' : 'À jour'}
+                </span>
+              )}
             </div>
             <p className="text-sm muted mb-8">
               Version installée : <strong>v{version?.version ?? '—'}</strong>.
@@ -231,13 +262,42 @@ export default function Settings() {
                   Nouvelle version disponible : <strong>v{updateCheck.latest}</strong>.
                 </>
               )}
+              {updateCheck && !updateCheck.latest && (
+                <> Renseignez le dépôt ci-dessous pour vérifier les mises à jour.</>
+              )}
             </p>
-            <button
-              className={`btn ${updateCheck?.update_available ? 'btn-primary' : ''}`}
-              onClick={() => { setUpdateOpen(true); setUpdateState('idle') }}
-            >
-              <IconZap size={15} /> {updateCheck?.update_available ? 'Mettre à jour maintenant' : 'Mettre à jour'}
-            </button>
+            <div className="field">
+              <label>Dépôt de mise à jour (owner/repo ou URL git)</label>
+              <input
+                className="input mono"
+                value={updateRepo}
+                placeholder="heyhey2thereal/LocalLive"
+                onChange={(e) => setUpdateRepo(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Branche à suivre</label>
+              <input
+                className="input mono"
+                value={updateBranch}
+                placeholder="feature/locallive-app"
+                onChange={(e) => setUpdateBranch(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-8">
+              <button className="btn" onClick={saveUpdateConfig} disabled={savingUpdate}>
+                {savingUpdate && <Spinner />} Enregistrer
+              </button>
+              <button className="btn btn-ghost" onClick={checkUpdate}>
+                <IconRefresh size={15} /> Vérifier
+              </button>
+              <button
+                className={`btn ${updateCheck?.update_available ? 'btn-primary' : ''}`}
+                onClick={() => { setUpdateOpen(true); setUpdateState('idle') }}
+              >
+                <IconZap size={15} /> Mettre à jour
+              </button>
+            </div>
           </div>
 
           <div className="card">

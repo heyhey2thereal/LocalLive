@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } from '../api'
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
-import { formatDuration, Loading, useToast } from '../components/ui'
+import { formatDuration, Loading, Modal, useToast } from '../components/ui'
 import { IconArrowRight, IconPlay, IconStop } from '../components/icons'
 
 // Map a transition id to a CSS animation class used to animate the monitors.
@@ -31,6 +31,7 @@ export default function PreviewProgram() {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [busy, setBusy] = useState(false)
   const [txClass, setTxClass] = useState('')
+  const [confirm, setConfirm] = useState<'start' | 'stop' | null>(null)
   const txTimer = useRef<number | null>(null)
 
   // Fast polling so preview/program react quickly (no perceptible delay).
@@ -83,10 +84,15 @@ export default function PreviewProgram() {
     txTimer.current = window.setTimeout(() => setTxClass(''), 900)
   }
 
-  // Take the preview to air, then swap preview/program.
+  // Take the preview to air (a switch only — never starts the broadcast), then
+  // swap preview/program.
   const swap = async () => {
     if (!target) {
       push({ kind: 'err', title: 'Choisissez d’abord une playlist dans l’aperçu' })
+      return
+    }
+    if (!running) {
+      push({ kind: 'info', title: 'Le direct est arrêté', message: 'Démarrez le direct pour basculer.' })
       return
     }
     setBusy(true)
@@ -104,19 +110,27 @@ export default function PreviewProgram() {
     }
   }
 
-  const toggleLive = async () => {
+  const startLive = async () => {
     setBusy(true)
     try {
-      if (running) {
-        await api.post('/api/broadcast/stop')
-        push({ kind: 'ok', title: 'Diffusion arrêtée' })
-      } else {
-        await api.post('/api/broadcast/start', {})
-        push({ kind: 'ok', title: 'Diffusion démarrée' })
-      }
+      await api.post('/api/broadcast/start', target ? { playlist_id: target } : {})
+      push({ kind: 'ok', title: 'Diffusion démarrée' })
       poll.refresh()
     } catch (err: any) {
-      push({ kind: 'err', title: 'Action impossible', message: err?.message })
+      push({ kind: 'err', title: 'Démarrage impossible', message: err?.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const stopLive = async () => {
+    setBusy(true)
+    try {
+      await api.post('/api/broadcast/stop')
+      push({ kind: 'ok', title: 'Diffusion arrêtée' })
+      poll.refresh()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Arrêt impossible', message: err?.message })
     } finally {
       setBusy(false)
     }
@@ -133,7 +147,7 @@ export default function PreviewProgram() {
             <span className="badge badge-info">APERÇU</span>
             <span className="text-sm muted-2 truncate">{preview?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={previewItem} emptyLabel="Aucune playlist dans l'aperçu" width={520} height={293} reloadKey={reloadKey} />
+          <ProgramPreview item={previewItem} emptyLabel="Aucune playlist dans l'aperçu" width={520} reloadKey={reloadKey} />
           <div className="switcher-monitor-foot">
             <select
               className="select grow"
@@ -165,7 +179,7 @@ export default function PreviewProgram() {
             </span>
             <span className="text-sm muted-2 truncate">{program?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} height={293} reloadKey={reloadKey} sound />
+          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} reloadKey={reloadKey} sound />
           <div className="switcher-monitor-foot">
             <span className="text-sm muted-2">
               {running && program
@@ -179,13 +193,15 @@ export default function PreviewProgram() {
       {/* Controls: live start/stop + transition */}
       <div className="switcher-controls">
         <div className="flex gap-8 items-center">
-          <button className={`btn ${running ? 'btn-danger' : 'btn-primary'} btn-lg`} disabled={busy} onClick={toggleLive}>
-            {running ? <IconStop size={18} /> : <IconPlay size={18} />}
-            {running ? 'Arrêter le direct' : 'Démarrer le direct'}
-          </button>
-          <button className="btn btn-primary btn-lg" disabled={busy || !target} onClick={swap}>
-            <IconPlay size={18} /> {busy ? 'Prise d’antenne…' : 'Mettre à l’antenne'}
-          </button>
+          {running ? (
+            <button className="btn btn-danger btn-lg" disabled={busy} onClick={() => setConfirm('stop')}>
+              <IconStop size={18} /> Arrêter le direct
+            </button>
+          ) : (
+            <button className="btn btn-primary btn-lg" disabled={busy} onClick={() => setConfirm('start')}>
+              <IconPlay size={18} /> Démarrer le direct
+            </button>
+          )}
         </div>
         <div className="flex gap-8 items-center">
           <span className="text-sm muted-2 nowrap">Transition</span>
@@ -221,6 +237,37 @@ export default function PreviewProgram() {
             ))}
           </div>
         </div>
+      )}
+
+      {confirm && (
+        <Modal
+          title={confirm === 'start' ? 'Démarrer le direct ?' : 'Arrêter le direct ?'}
+          onClose={() => setConfirm(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setConfirm(null)}>
+                Annuler
+              </button>
+              <button
+                className={`btn ${confirm === 'stop' ? 'btn-danger' : 'btn-primary'}`}
+                onClick={() => {
+                  const action = confirm
+                  setConfirm(null)
+                  if (action === 'start') void startLive()
+                  else void stopLive()
+                }}
+              >
+                {confirm === 'start' ? 'Démarrer' : 'Arrêter'}
+              </button>
+            </>
+          }
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {confirm === 'start'
+              ? 'Le direct va être mis à l’antenne. Confirmez-vous le démarrage de la diffusion ?'
+              : 'La diffusion va être coupée immédiatement. Confirmez-vous l’arrêt du direct ?'}
+          </p>
+        </Modal>
       )}
     </div>
   )

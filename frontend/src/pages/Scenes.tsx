@@ -168,9 +168,11 @@ export default function Scenes() {
 
   const deleteScene = async () => {
     if (!toDelete) return
+    const id = toDelete.id
     try {
-      await api.del(`/api/scenes/${toDelete.id}`)
+      await api.del(`/api/scenes/${id}`)
       setToDelete(null)
+      setEditing(null)
       await load()
       push({ kind: 'ok', title: 'Scène supprimée' })
     } catch (err: any) {
@@ -178,15 +180,16 @@ export default function Scenes() {
     }
   }
 
-  // Size the canvas so it always fits the window height (minus chrome) as well
-  // as the available width, avoiding any scrollbar around the editor.
+  // Size the canvas so it always fits both the available width and the window
+  // height (minus chrome), so the editor never overflows. It is the exact
+  // preview frame — nothing larger.
   const previewWidth = useMemo(() => {
     const w = editing?.width ?? 1920
     const h = editing?.height ?? 1080
-    const byWidth = Math.min(MAX_PREVIEW_W, Math.max(window.innerWidth - 520, 240))
-    const maxH = Math.max(window.innerHeight - 340, 180)
+    const byWidth = Math.min(MAX_PREVIEW_W, Math.max(window.innerWidth - 560, 220))
+    const maxH = Math.max(window.innerHeight - 360, 160)
     const byHeight = maxH * (w / h)
-    return Math.round(Math.min(byWidth, byHeight))
+    return Math.round(Math.max(160, Math.min(byWidth, byHeight)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.width, editing?.height, viewport])
 
@@ -231,17 +234,17 @@ export default function Scenes() {
                   {s.width}×{s.height}
                 </div>
               </div>
-              <div className="row-actions" style={{ position: 'absolute', top: 8, right: 8 }}>
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setToDelete(s)
-                  }}
-                >
-                  <IconTrash size={15} />
-                </button>
-              </div>
+              <button
+                className="card-delete"
+                title="Supprimer la scène"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  setToDelete(s)
+                }}
+              >
+                <IconTrash size={15} />
+              </button>
             </div>
           ))}
         </div>
@@ -254,6 +257,15 @@ export default function Scenes() {
           full
           footer={
             <>
+              {editing.id !== 0 && (
+                <button
+                  className="btn btn-danger"
+                  style={{ marginRight: 'auto' }}
+                  onClick={() => setToDelete(editing)}
+                >
+                  <IconTrash size={15} /> Supprimer
+                </button>
+              )}
               <button className="btn" onClick={() => setEditing(null)}>
                 Annuler
               </button>

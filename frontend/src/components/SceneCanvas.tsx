@@ -197,9 +197,9 @@ export default function SceneCanvas({
     const baseFont = layer.font_size ?? (layer.type === 'text' ? 48 : 36)
     drag.current = { index, handle, startX: e.clientX, startY: e.clientY, orig: { ...layer }, baseW, baseH, baseFont, isText }
 
-    const onMove = (ev: MouseEvent) => {
-      const d = drag.current
-      if (!d) return
+    // Compute the new layer position/size from the mouse event.
+    const compute = (ev: MouseEvent): { patch: Partial<SceneLayer>; guides: Guides } => {
+      const d = drag.current!
       const dx = (ev.clientX - d.startX) / scale
       const dy = (ev.clientY - d.startY) / scale
       const shift = ev.shiftKey
@@ -209,17 +209,14 @@ export default function SceneCanvas({
         const h = d.orig.height ?? 0
         let nx = d.orig.x + dx
         let ny = d.orig.y + dy
+        let g: Guides = { v: [], h: [] }
         if (!shift) {
           const res = applyGuides(d.index, nx, ny, w, h)
           nx = res.x
           ny = res.y
-          setGuides(res.guides)
-        } else {
-          setGuides({ v: [], h: [] })
+          g = res.guides
         }
-        const c = clamp({ x: nx, y: ny, width: w, height: h })
-        patchLayer(d.index, c)
-        return
+        return { patch: clamp({ x: nx, y: ny, width: w, height: h }), guides: g }
       }
       let x = d.orig.x
       let y = d.orig.y
@@ -258,10 +255,29 @@ export default function SceneCanvas({
       if (d.isText && d.baseH > 0) {
         patch.font_size = Math.max(MIN_FONT, Math.round((d.baseFont * h) / d.baseH))
       }
+      return { patch, guides: { v: [], h: [] } }
+    }
+
+    // Throttle updates to one per animation frame so dragging stays fluid even
+    // with many layers (a re-render per mousemove would stutter).
+    let raf = 0
+    let pending: MouseEvent | null = null
+    const flush = () => {
+      raf = 0
+      const d = drag.current
+      if (!d || !pending) return
+      const { patch, guides: g } = compute(pending)
+      pending = null
+      setGuides(g)
       patchLayer(d.index, patch)
+    }
+    const onMove = (ev: MouseEvent) => {
+      pending = ev
+      if (!raf) raf = window.requestAnimationFrame(flush)
     }
     const onUp = () => {
       drag.current = null
+      if (raf) window.cancelAnimationFrame(raf)
       setGuides({ v: [], h: [] })
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)

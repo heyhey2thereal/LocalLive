@@ -54,7 +54,6 @@ export default function ProgramWindow() {
   // Fit the 16:9 render inside the window; no margin in full-screen.
   const pad = fullscreen ? 0 : 24
   const width = Math.min(size.w - pad, ((size.h - (fullscreen ? 0 : 48)) * 16) / 9)
-  const height = (width * 9) / 16
 
   return (
     <div className="program-window" ref={rootRef} onClick={() => setSoundEnabled(true)}>
@@ -79,7 +78,7 @@ export default function ProgramWindow() {
         </div>
       )}
       <div className="program-window-stage">
-        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} height={height} sound={soundEnabled} />
+        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} sound={soundEnabled} />
       </div>
     </div>
   )

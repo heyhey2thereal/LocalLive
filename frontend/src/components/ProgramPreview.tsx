@@ -19,6 +19,20 @@ interface SceneLike {
   layers: SceneLayer[]
 }
 
+// Live MM:SS clock, ticking every second, mirroring the FFmpeg drawtext timer.
+function Countdown({ total, mode, fontPx }: { total: number; mode: string; fontPx: number }) {
+  const [now, setNow] = useState(0)
+  useEffect(() => {
+    const start = Date.now()
+    const t = window.setInterval(() => setNow(Math.floor((Date.now() - start) / 1000)), 250)
+    return () => window.clearInterval(t)
+  }, [total, mode])
+  const secs = mode === 'up' ? total + now : Math.max(0, total - now)
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0')
+  const ss = String(secs % 60).padStart(2, '0')
+  return <span style={{ fontSize: fontPx }}>{mm}:{ss}</span>
+}
+
 function layerBadge(l: SceneLayer): string | null {
   if (l.type === 'reactive') return `Réactif · ${l.visualizer ?? ''}`
   if (l.type === 'code') return `Code · ${l.code ?? ''}`
@@ -61,6 +75,14 @@ export function SceneRender({
               ? m.thumbnail_url ?? m.preview_url ?? m.stream_url
               : m.preview_url ?? m.stream_url ?? m.thumbnail_url
             : null
+          // Always give the layer an explicit size (same rule as the editor) so
+          // nothing can overflow the frame even if a stored layer has no size.
+          const lw = l.width ?? Math.round(scene.width * 0.25)
+          let lh = l.height ?? 0
+          if (!lh) {
+            const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
+            lh = Math.round(lw * ratio)
+          }
           return (
             <div
               key={i}
@@ -68,8 +90,8 @@ export function SceneRender({
               style={{
                 left: l.x * scale,
                 top: l.y * scale,
-                width: l.width ? l.width * scale : undefined,
-                height: l.height ? l.height * scale : undefined,
+                width: lw * scale,
+                height: lh * scale,
                 opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
                 color: l.color,
                 fontSize: isBox ? (l.font_size ?? 32) * scale : undefined,
@@ -79,21 +101,45 @@ export function SceneRender({
                 zIndex: (l.z ?? 0) + 1,
               }}
             >
-              {isMedia && imgSrc && <img src={imgSrc} alt="" />}
+              {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
               {isMedia && !imgSrc && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.type}</span>}
               {!isMedia && !isBox && badge && (
                 <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{badge}</span>
               )}
               {l.type === 'chat' && <span style={{ fontSize: 12, color: 'var(--text-2)' }}>💬 {l.chat_source ?? 'chat'}</span>}
               {l.type === 'countdown' && (
-                <span style={{ fontSize: (l.font_size ?? 96) * scale * 0.6 }}>
-                  {l.countdown_mode === 'up' ? `+${l.countdown_seconds ?? 60}` : l.countdown_seconds ?? 60}
-                </span>
+                <Countdown
+                  total={l.countdown_seconds ?? 60}
+                  mode={l.countdown_mode ?? 'down'}
+                  fontPx={(l.font_size ?? 96) * scale}
+                />
               )}
               {isText && (l.text || 'Texte')}
             </div>
           )
         })}
+    </div>
+  )
+}
+
+// Fills its container: measures the parent and renders the scene at that exact
+// size, so the monitor never grows/shrinks because of a big image. The aspect
+// ratio is preserved by the parent (which owns the 16:9 box).
+export function FitScene({ scene, media, preferThumb }: { scene: SceneLike; media: Media[]; preferThumb?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => setW(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return (
+    <div ref={ref} className="fit-scene">
+      {w > 0 && <SceneRender scene={scene} media={media} width={w} preferThumb={preferThumb} />}
     </div>
   )
 }
@@ -106,13 +152,11 @@ export function SceneThumb({ scene, media }: { scene: Scene; media: Media[] }) {
 function MediaRender({
   item,
   width,
-  height,
   sound,
   reloadKey,
 }: {
   item: EngineItem
   width: number
-  height: number
   sound: boolean
   reloadKey?: string | number
 }) {
@@ -146,16 +190,16 @@ function MediaRender({
 
   if (item.scene_id) {
     if (!ready || !scene) return <div className="stage-empty">Chargement…</div>
-    return <SceneRender scene={scene} media={media} width={width} preferThumb={width < 480} />
+    return <FitScene scene={scene} media={media} preferThumb={width < 480} />
   }
   if (item.kind === 'image' && item.stream_url) {
-    return <img src={item.stream_url} alt={item.title} style={{ maxWidth: width, maxHeight: height }} />
+    return <img className="fit-media" src={item.stream_url} alt={item.title} />
   }
   if (item.kind === 'video' && item.stream_url) {
     return (
       <video
+        className="fit-media"
         src={item.stream_url}
-        style={{ maxWidth: width, maxHeight: height }}
         muted={!sound}
         autoPlay
         loop
@@ -179,12 +223,11 @@ interface Props {
   item: EngineItem | null
   emptyLabel: string
   width: number
-  height: number
   sound?: boolean
   reloadKey?: string | number
 }
 
-export default function ProgramPreview({ item, emptyLabel, width, height, sound = false, reloadKey }: Props) {
+export default function ProgramPreview({ item, emptyLabel, width, sound = false, reloadKey }: Props) {
   const tileRef = useRef<HTMLDivElement>(null)
   // Enabling sound is allowed once the user has interacted; the full-screen
   // button counts as that interaction, so the audio plays right away.
@@ -202,7 +245,7 @@ export default function ProgramPreview({ item, emptyLabel, width, height, sound 
   }
   return (
     <div className="program-tile" ref={tileRef}>
-      <MediaRender item={item} width={width} height={height} sound={soundOn} reloadKey={reloadKey} />
+      <MediaRender item={item} width={width} sound={soundOn} reloadKey={reloadKey} />
       <button
         className="program-fullscreen"
         title="Plein écran (avec son)"

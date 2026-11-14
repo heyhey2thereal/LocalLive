@@ -24,7 +24,7 @@ ALLOWED_SETTINGS = {
     "stream_rtmp_url", "stream_key", "stream_width", "stream_height", "stream_fps",
     "stream_bitrate", "stream_audio_bitrate", "stream_preset", "output_kind", "output_file",
     "fallback_playlist_id", "image_duration", "channel_name", "timezone", "language",
-    "update_repo", "update_command",
+    "update_repo", "update_command", "update_branch",
 }
 
 
@@ -50,6 +50,7 @@ class SettingsPayload(BaseModel):
     language: str | None = None
     update_repo: str | None = None
     update_command: str | None = None
+    update_branch: str | None = None
 
 
 def _preset_allowed() -> set[str]:

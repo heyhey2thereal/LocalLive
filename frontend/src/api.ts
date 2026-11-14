@@ -253,6 +253,9 @@ export interface BroadcastSettings {
   channel_name?: string
   timezone?: string
   language?: string
+  update_repo?: string
+  update_branch?: string
+  update_command?: string
 }
 
 // Lightweight polling payload (engine + system only).
