@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
 import { CheckIcon, Spinner } from '../components/ui'
+import { LogoMark } from '../components/Logo'
 import { t } from '../i18n'
 
 interface Checks {
@@ -133,6 +134,13 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
   return (
     <div className="setup-wrap">
       <div className="setup-card">
+        <div className="flex items-center gap-12 mb-16">
+          <LogoMark size={40} />
+          <div>
+            <h1 style={{ fontSize: 20 }}>{t('app.name')}</h1>
+            <span className="text-sm muted-2">{t('setup.title')}</span>
+          </div>
+        </div>
         <div className="setup-steps">
           {STEP_LABELS.map((label, i) => (
             <div key={label} className={`step-pip ${i < step ? 'done' : ''} ${i === step ? 'active' : ''}`}>

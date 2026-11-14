@@ -99,6 +99,11 @@ export interface PlaylistItem {
   kind: string | null
   thumbnail_url: string | null
   media_duration: number | null
+  transition: string
+  transition_duration: number
+  background_audio_id: number | null
+  background_audio_title: string | null
+  background_volume: number
 }
 
 export interface Playlist {
@@ -111,8 +116,17 @@ export interface Playlist {
   total_duration: number
 }
 
+export type LayerType =
+  | 'video'
+  | 'image'
+  | 'text'
+  | 'logo'
+  | 'overlay'
+  | 'reactive'
+  | 'code'
+
 export interface SceneLayer {
-  type: 'video' | 'image' | 'text' | 'logo' | 'overlay'
+  type: LayerType
   x: number
   y: number
   width?: number | null
@@ -120,11 +134,16 @@ export interface SceneLayer {
   opacity?: number
   visible?: boolean
   z?: number
+  rotation?: number
   media_id?: number | null
   text?: string | null
   font_size?: number
   color?: string
   background?: string | null
+  animation?: string
+  animation_speed?: number | null
+  visualizer?: string | null
+  code?: string | null
 }
 
 export interface Scene {
@@ -216,4 +235,74 @@ export interface BroadcastSettings {
   channel_name?: string
   timezone?: string
   language?: string
+}
+
+// Lightweight polling payload (engine + system only).
+export interface LiveStatus {
+  engine: EngineStatus
+  system: SystemMetrics
+}
+
+export interface OutputTarget {
+  id: number | 'primary'
+  name: string
+  kind: string | null
+  destination: string | null
+  width: number | null
+  height: number | null
+  primary: boolean
+}
+
+export interface OutputsResponse {
+  items: OutputTarget[]
+  count: number
+}
+
+export interface PreviewData {
+  program: EngineStatus
+  preview: {
+    playlist_id: number | null
+    playlist_name: string
+    items: EngineItem[]
+    duration: number
+  }
+  outputs: OutputTarget[]
+}
+
+export interface Stream {
+  id: number
+  name: string
+  description: string | null
+  tags: string[]
+  privacy: 'public' | 'unlisted' | 'private'
+  category: string | null
+  encoding: string
+  kind: 'rtmp' | 'file'
+  rtmp_url: string | null
+  output_file: string | null
+  width: number
+  height: number
+  fps: number
+  bitrate: number
+  audio_bitrate: number
+  enabled: boolean
+  has_stream_key: boolean
+  stream_key_masked: string
+}
+
+export interface CatalogOption {
+  id: string
+  label: string
+  description?: string
+  default_duration?: number
+  hard_cut?: boolean
+  speed_default?: string | null
+}
+
+export interface Catalog {
+  transitions: CatalogOption[]
+  animations: CatalogOption[]
+  visualizers: CatalogOption[]
+  layer_types: CatalogOption[]
+  code_examples: { label: string; code: string }[]
 }

@@ -195,3 +195,35 @@ export const IconRefresh = ({ size = 16, className }: P) => (
     <path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6" />
   </svg>
 )
+
+export const IconStreams = ({ size = 18, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7" />
+  </svg>
+)
+
+export const IconRotate = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M3 12a9 9 0 109-9 9 9 0 00-6.7 3M3 3v6h6" />
+  </svg>
+)
+
+export const IconDuplicate = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+  </svg>
+)
+
+export const IconZap = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" />
+  </svg>
+)
+
+export const IconCode = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+  </svg>
+)

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { useAuth } from '../auth'
 import { Spinner } from '../components/ui'
+import { LogoMark } from '../components/Logo'
 import { t } from '../i18n'
 
 export default function Login() {
@@ -32,9 +33,7 @@ export default function Login() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <div className="flex items-center gap-12 mb-16">
-          <div className="brand-mark" style={{ width: 44, height: 44, fontSize: 20 }}>
-            L
-          </div>
+          <LogoMark size={44} />
           <div>
             <h1 style={{ fontSize: 20 }}>{t('app.name')}</h1>
             <span className="text-sm muted-2">{t('app.tagline')}</span>

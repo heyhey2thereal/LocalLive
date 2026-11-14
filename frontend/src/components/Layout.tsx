@@ -8,11 +8,16 @@ import {
   IconMedia,
   IconPlaylist,
   IconSettings,
+  IconSignal,
+  IconStreams,
 } from './icons'
+import { LogoMark } from './Logo'
 import { t } from '../i18n'
 
 const NAV = [
   { to: '/', label: 'nav.dashboard', icon: IconDashboard, end: true },
+  { to: '/preview', label: 'nav.preview', icon: IconSignal },
+  { to: '/streams', label: 'nav.streams', icon: IconStreams },
   { to: '/media', label: 'nav.media', icon: IconMedia },
   { to: '/playlists', label: 'nav.playlists', icon: IconPlaylist },
   { to: '/scenes', label: 'nav.scenes', icon: IconLayers },
@@ -22,6 +27,8 @@ const NAV = [
 
 const TITLES: Record<string, string> = {
   '/': 'dashboard.title',
+  '/preview': 'preview.title',
+  '/streams': 'streams.title',
   '/media': 'media.title',
   '/playlists': 'playlists.title',
   '/scenes': 'scenes.title',
@@ -43,7 +50,7 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">L</div>
+          <LogoMark size={34} />
           <div className="brand-text">
             <span className="brand-name">{t('app.name')}</span>
             <span className="brand-sub">{channelName}</span>
