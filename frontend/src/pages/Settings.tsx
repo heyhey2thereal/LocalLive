@@ -142,22 +142,34 @@ export default function Settings() {
 
   const runUpdate = async () => {
     setUpdateState('checking')
-    setUpdateMsg('Vérification des mises à jour…')
-    // Ask the backend to fetch the latest version (best effort; the actual code
-    // update is performed by update.sh on the host). We poll the version after.
+    setUpdateMsg('Vérification…')
+    // Ask the backend to run the configured update command. The service usually
+    // runs unprivileged and cannot update itself, so when no command is set (or
+    // it fails) we show the exact shell commands to run on the host.
     try {
-      await api.post('/api/system/update', {}).catch(() => {})
-    } catch {
-      /* ignore */
+      const res = await api.post<{ ok: boolean; manual?: boolean; hint?: string; error?: string }>(
+        '/api/system/update',
+        {},
+      )
+      if (res.ok) {
+        setUpdateState('done')
+        setUpdateMsg('Mise à jour appliquée. Redémarrage du service…')
+        await new Promise((r) => setTimeout(r, 1500))
+        window.location.reload()
+        return
+      }
+      setUpdateState('idle')
+      setUpdateOpen(false)
+      push({
+        kind: 'info',
+        title: 'Mise à jour manuelle requise',
+        message: res.hint ?? res.error ?? 'Lancez update.sh sur le serveur.',
+      })
+    } catch (err: any) {
+      setUpdateState('idle')
+      setUpdateOpen(false)
+      push({ kind: 'err', title: 'Mise à jour impossible', message: err?.message })
     }
-    setUpdateState('updating')
-    setUpdateMsg('Téléchargement et application…')
-    await new Promise((r) => setTimeout(r, 2500))
-    setUpdateState('done')
-    setUpdateMsg('Mise à jour terminée. Redémarrage du service…')
-    await new Promise((r) => setTimeout(r, 1200))
-    // Reload the page: the service may have restarted on the new version.
-    window.location.reload()
   }
 
   if (loading || !settings) return <Loading />
