@@ -84,15 +84,13 @@ export default function PreviewProgram() {
     txTimer.current = window.setTimeout(() => setTxClass(''), 900)
   }
 
-  // Take the preview to air (a switch only — never starts the broadcast), then
-  // swap preview/program.
+  // Take the preview to air. This is a take, not a separate "start the live"
+  // step: if the broadcast is stopped, the take starts it with the chosen
+  // playlist (the backend `switch_playlist` starts the engine when it is idle),
+  // then swaps preview/program.
   const swap = async () => {
     if (!target) {
       push({ kind: 'err', title: 'Choisissez d’abord une playlist dans l’aperçu' })
-      return
-    }
-    if (!running) {
-      push({ kind: 'info', title: 'Le direct est arrêté', message: 'Démarrez le direct pour basculer.' })
       return
     }
     setBusy(true)
@@ -100,7 +98,11 @@ export default function PreviewProgram() {
     playTransition()
     try {
       await api.post('/api/broadcast/take', { playlist_id: target })
-      push({ kind: 'ok', title: 'Prise d’antenne effectuée' })
+      push({
+        kind: 'ok',
+        title: 'Prise d’antenne effectuée',
+        message: running ? undefined : 'La diffusion a été démarrée.',
+      })
       setSelectedId(previousProgram ?? '')
       poll.refresh()
     } catch (err: any) {

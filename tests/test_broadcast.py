@@ -81,6 +81,25 @@ def test_broadcast_start_without_playlist_fails(authed):
     assert r.status_code == 422
 
 
+def test_take_starts_broadcast_when_stopped(authed, tmp_path):
+    # Putting a playlist on programme must work without a separate "start the
+    # live" step: the take itself starts the broadcast when it is idle.
+    pid = _setup_playlist(authed, tmp_path)
+    authed.put("/api/broadcast/settings", json={
+        "output_kind": "file",
+        "output_file": str(tmp_path / "take.ts"),
+        "stream_width": 160, "stream_height": 120,
+    })
+    assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
+    r = authed.post("/api/broadcast/take", json={"playlist_id": pid})
+    assert r.status_code == 200, r.text
+    time.sleep(1.5)
+    status = authed.get("/api/broadcast/status").json()
+    assert status["engine"]["running"] is True
+    assert status["engine"]["playlist_name"] == "Live"
+    authed.post("/api/broadcast/stop")
+
+
 def test_broadcast_requires_admin(installed):
     assert installed.post("/api/broadcast/start", json={}).status_code == 401
     assert installed.post("/api/broadcast/stop").status_code == 401

@@ -3,6 +3,22 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.6.1] — 2026-11-14
+
+### Corrigé
+- **Mise en programme sans direct** : la flèche de prise d'antenne (Aperçu /
+  Programme) démarre la diffusion toute seule quand elle est arrêtée — plus
+  besoin de « Démarrer le direct » avant de mettre une playlist au programme.
+- **Vignette de scène partout** : chaque endroit où l'on choisit une scène
+  (sélecteur d'ajout à une playlist, lignes de playlist, aperçu d'un élément)
+  affiche désormais un **rendu réel de la scène** au lieu d'un carré vide.
+
+### Modifié
+- **Mise à jour sans configuration** : l'interface ne demande plus le **dépôt**
+  ni la **branche**. `install.sh` les détecte dans le dépôt cloné (URL du remote
+  et branche courante) et les enregistre côté serveur ; l'opérateur n'a plus
+  qu'un bouton **« Mettre à jour »**.
+
 ## [2.6.0] — 2026-11-14
 
 ### Corrigé

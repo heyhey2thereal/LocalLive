@@ -144,9 +144,19 @@ export function FitScene({ scene, media, preferThumb }: { scene: SceneLike; medi
   )
 }
 
-// Small thumbnail used in the scene list: renders the scene read-only.
-export function SceneThumb({ scene, media }: { scene: Scene; media: Media[] }) {
-  return <SceneRender scene={scene} media={media} width={220} preferThumb />
+// Small thumbnail of a scene: renders it read-only. Used everywhere a scene is
+// listed or chosen (scene grid, playlist pickers, playlist rows, dashboard) so
+// the operator can see what the scene looks like at a glance.
+export function SceneThumb({
+  scene,
+  media,
+  width = 220,
+}: {
+  scene: Scene
+  media: Media[]
+  width?: number
+}) {
+  return <SceneRender scene={scene} media={media} width={width} preferThumb />
 }
 
 function MediaRender({

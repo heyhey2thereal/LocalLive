@@ -10,6 +10,7 @@ import {
   useToast,
 } from '../components/ui'
 import { IconGrip, IconMusic, IconPlay, IconPlaylist, IconPlus, IconTransition, IconTrash } from '../components/icons'
+import { SceneThumb } from '../components/ProgramPreview'
 
 export default function Playlists() {
   const { push } = useToast()
@@ -31,15 +32,22 @@ export default function Playlists() {
 
   const selected = playlists.find((p) => p.id === selectedId) ?? null
 
+  // Resolve a playlist item's scene so its row can show the scene render.
+  const sceneFor = (id: number | null | undefined) => (id ? scenes.find((s) => s.id === id) : undefined)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [data, cat] = await Promise.all([
+      const [data, cat, m, s] = await Promise.all([
         api.get<{ items: Playlist[] }>('/api/playlists'),
         api.get<Catalog>('/api/meta/catalog').catch(() => null),
+        api.get<{ items: Media[] }>('/api/media').catch(() => ({ items: [] })),
+        api.get<{ items: Scene[] }>('/api/scenes').catch(() => ({ items: [] })),
       ])
       setPlaylists(data.items)
       setCatalog(cat)
+      setMedia(m.items)
+      setScenes(s.items)
       setSelectedId((prev) => prev ?? data.items[0]?.id ?? null)
     } catch (err: any) {
       push({ kind: 'err', title: 'Chargement impossible', message: err?.message })
@@ -278,7 +286,11 @@ export default function Playlists() {
                     <span className="text-sm muted-2" style={{ width: 18 }}>
                       {index + 1}
                     </span>
-                    {item.thumbnail_url ? (
+                    {item.scene_id && sceneFor(item.scene_id) ? (
+                      <div className="row-thumb scene-thumb-mini">
+                        <SceneThumb scene={sceneFor(item.scene_id)!} media={media} width={64} />
+                      </div>
+                    ) : item.thumbnail_url ? (
                       <img className="row-thumb" src={item.thumbnail_url} alt="" />
                     ) : (
                       <div className="row-thumb" />
@@ -395,7 +407,9 @@ export default function Playlists() {
               <div className="list" style={{ maxHeight: 380, overflowY: 'auto' }}>
                 {scenes.map((s) => (
                   <div key={s.id} className="row">
-                    <div className="row-thumb" />
+                    <div className="row-thumb scene-thumb-mini">
+                      <SceneThumb scene={s} media={media} width={64} />
+                    </div>
                     <div className="row-main">
                       <div className="row-title">{s.name}</div>
                       <div className="row-sub">
@@ -427,7 +441,9 @@ export default function Playlists() {
       {preview && (
         <Modal title={`Aperçu : ${preview.title}`} onClose={() => setPreview(null)} wide>
           <div className="stage">
-            {preview.kind === 'image' ? (
+            {preview.scene_id && sceneFor(preview.scene_id) ? (
+              <SceneThumb scene={sceneFor(preview.scene_id)!} media={media} width={880} />
+            ) : preview.kind === 'image' ? (
               <img src={preview.thumbnail_url ?? ''} alt="" />
             ) : preview.media_id ? (
               <video src={`/api/media/${preview.media_id}/stream`} controls autoPlay />

@@ -164,6 +164,23 @@ log_ok "Base de données prête : ${DATA_DIR}/locallive.db"
 # ---------------------------------------------------------------------------
 # 8. Configuration file
 # ---------------------------------------------------------------------------
+# The update source (git repository + branch) is detected from the clone this
+# installer is run from, so the operator is never asked for it: the interface
+# just offers a single "Mettre à jour" button. UPDATE_REPO / UPDATE_BRANCH may
+# still be passed explicitly to override the detection.
+if [[ -z "${UPDATE_REPO:-}" ]]; then
+  UPDATE_REPO="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
+fi
+if [[ -z "${UPDATE_BRANCH:-}" ]]; then
+  UPDATE_BRANCH="$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+UPDATE_BRANCH="${UPDATE_BRANCH:-main}"
+if [[ -n "${UPDATE_REPO}" ]]; then
+  log_ok "Source de mise à jour détectée : ${UPDATE_REPO} (branche ${UPDATE_BRANCH})"
+else
+  log_warn "Dépôt git introuvable : la mise à jour depuis l'interface sera indisponible."
+fi
+
 if [[ ! -f "${CONF_DIR}/locallive.env" ]]; then
   cat >"${CONF_DIR}/locallive.env" <<EOF
 # LocalLive — configuration de service
@@ -171,9 +188,10 @@ LOCALLIVE_DATA=${DATA_DIR}
 LOCALLIVE_FRONTEND=${APP_DIR}/frontend/dist
 LOCALLIVE_HOST=${APP_HOST}
 LOCALLIVE_PORT=${APP_PORT}
-# Mise à jour depuis l'interface : dépôt git et branche à suivre.
-LOCALLIVE_UPDATE_REPO=${UPDATE_REPO:-}
-LOCALLIVE_UPDATE_BRANCH=${UPDATE_BRANCH:-main}
+# Mise à jour depuis l'interface : dépôt git et branche à suivre (détectés à
+# l'installation depuis le dépôt cloné ; jamais demandés à l'opérateur).
+LOCALLIVE_UPDATE_REPO=${UPDATE_REPO}
+LOCALLIVE_UPDATE_BRANCH=${UPDATE_BRANCH}
 EOF
   # The service runs as APP_USER, so the file must be readable by APP_GROUP:
   # root:APP_GROUP with mode 0640 (readable by the service, not world-readable).
@@ -181,6 +199,16 @@ EOF
   chmod 0640 "${CONF_DIR}/locallive.env"
   log_ok "Fichier de configuration créé : ${CONF_DIR}/locallive.env"
 else
+  # Refresh the update source on re-run so it follows the current clone.
+  if grep -q '^LOCALLIVE_UPDATE_REPO=' "${CONF_DIR}/locallive.env"; then
+    sed -i "s|^LOCALLIVE_UPDATE_REPO=.*|LOCALLIVE_UPDATE_REPO=${UPDATE_REPO}|" "${CONF_DIR}/locallive.env"
+    sed -i "s|^LOCALLIVE_UPDATE_BRANCH=.*|LOCALLIVE_UPDATE_BRANCH=${UPDATE_BRANCH}|" "${CONF_DIR}/locallive.env"
+  else
+    {
+      echo "LOCALLIVE_UPDATE_REPO=${UPDATE_REPO}"
+      echo "LOCALLIVE_UPDATE_BRANCH=${UPDATE_BRANCH}"
+    } >>"${CONF_DIR}/locallive.env"
+  fi
   # Repair ownership/permissions on re-run so an existing file stays readable.
   chown "root:${APP_GROUP}" "${CONF_DIR}/locallive.env" 2>/dev/null || true
   chmod 0640 "${CONF_DIR}/locallive.env" 2>/dev/null || true
@@ -198,9 +226,10 @@ EOF
 chmod 0440 "/etc/sudoers.d/locallive-update"
 log_ok "Programme de mise à jour installé (/usr/local/sbin/locallive-update)"
 
-# Tell the application which command to run for updates.
+# Tell the application which command to run for updates, and seed the update
+# source (repo + branch) so the interface needs no configuration at all.
 env LOCALLIVE_DATA="${DATA_DIR}" "${VENV_DIR}/bin/python" -c \
-  "import sys; sys.path.insert(0, '${APP_DIR}/backend'); from app import db; db.set_setting('update_command', 'sudo /usr/local/sbin/locallive-update')" \
+  "import sys; sys.path.insert(0, '${APP_DIR}/backend'); from app import db; db.set_setting('update_command', 'sudo /usr/local/sbin/locallive-update'); db.set_setting('update_repo', '${UPDATE_REPO}'); db.set_setting('update_branch', '${UPDATE_BRANCH}')" \
   2>/dev/null || true
 
 # ---------------------------------------------------------------------------

@@ -14,21 +14,46 @@ from ..deps import current_user, require
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 
+def _normalize_repo(value: str) -> str:
+    """Turn a git remote URL into the "owner/repo" form the GitHub API expects.
+
+    Accepts "owner/repo", "https://github.com/owner/repo(.git)" and
+    "git@github.com:owner/repo.git". Anything unrecognised is returned as-is.
+    """
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("git@"):
+        # git@host:owner/repo.git
+        text = text.split(":", 1)[-1]
+    elif "://" in text:
+        # Strip the scheme and host: keep the path only.
+        text = text.split("://", 1)[1]
+        text = text.split("/", 1)[1] if "/" in text else ""
+    text = text.strip("/")
+    if text.endswith(".git"):
+        text = text[:-4]
+    parts = [p for p in text.split("/") if p]
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return text
+
+
 @router.get("/update/check")
 def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
     """Compare the running version with the latest published tag.
 
-    `update_repo` (setting) is an optional "owner/repo"; when set, the latest
-    release tag is read from the public GitHub API. Without it we simply report
-    the running version and that no source is configured.
+    The update source (git repo + branch) is configured by install.sh from the
+    clone it was run from; it is never asked of the operator. `update_repo`
+    (setting) may override it; otherwise we fall back to the host configuration
+    (LOCALLIVE_UPDATE_REPO / LOCALLIVE_UPDATE_BRANCH, set by install.sh).
     """
     import os
 
-    repo = (db.get_setting("update_repo", "") or "").strip()
-    if not repo:
-        # Fall back to the host configuration (set by install.sh) if present.
-        env = os.environ.get("LOCALLIVE_UPDATE_REPO", "").strip()
-        repo = env
+    repo = _normalize_repo(db.get_setting("update_repo", "") or os.environ.get("LOCALLIVE_UPDATE_REPO", ""))
+    branch = (db.get_setting("update_branch", "") or "").strip()
+    if not branch:
+        branch = os.environ.get("LOCALLIVE_UPDATE_BRANCH", "").strip() or "main"
     latest = None
     if repo:
         import json
@@ -46,7 +71,13 @@ def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
     # Only offer an update when the published version is genuinely newer, so the
     # UI never nags when everything is already up to date.
     available = versioning.is_newer(latest, __version__)
-    return {"current": __version__, "latest": latest, "update_available": available, "repo": repo}
+    return {
+        "current": __version__,
+        "latest": latest,
+        "update_available": available,
+        "repo": repo,
+        "branch": branch,
+    }
 
 
 @router.post("/update")

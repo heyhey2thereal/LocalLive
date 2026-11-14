@@ -82,7 +82,8 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Deux moniteurs **identiques côte à côte** : **Aperçu** (à gauche) et
   **Programme** (à droite), même taille et même ligne.
 - **Flèche de transition** entre les deux : un clic met l'aperçu à l'antenne et
-  fait basculer l'ancien programme dans l'aperçu.
+  fait basculer l'ancien programme dans l'aperçu. Si la diffusion est arrêtée,
+  la prise d'antenne **démarre le direct** : aucune étape préalable.
 - Choix de la **transition** (coupe, fondu, balayage…) sous les moniteurs.
 - **Un seul bouton** pour mettre une playlist à l'antenne ; **contenu de
   l'aperçu** listé en bas (masquable).
@@ -113,8 +114,9 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 
 ### Paramètres
 - Chaîne (nom, fuseau, durée d'image), sécurité (mot de passe), journal serveur.
-- **Bouton de mise à jour** : vérifie la dernière version publiée, affiche une
-  animation de chargement puis redémarre.
+- **Bouton de mise à jour** : vérifie la dernière version publiée et l'applique
+  en un clic. Le dépôt et la branche sont détectés à l'installation (dépôt cloné)
+  et **jamais demandés** à l'opérateur.
 - **Réinitialisation complète** avec **triple confirmation** (résumé, avertissement,
   saisie de « RESET ») : efface tout le contenu en conservant les comptes.
 

@@ -136,8 +136,23 @@ def test_update_check_reports_repo_and_branch(authed):
     authed.put("/api/broadcast/settings", json={"update_repo": "owner/repo", "update_branch": "main"})
     data = authed.get("/api/system/update/check").json()
     assert data["repo"] == "owner/repo"
+    assert data["branch"] == "main"
     # No network in tests: latest stays null, so no update is offered.
     assert data["update_available"] is False
+
+
+def test_update_check_normalizes_git_url(authed):
+    # install.sh stores the clone's remote URL; the GitHub API needs owner/repo.
+    authed.put("/api/broadcast/settings", json={"update_repo": "https://github.com/heyhey2thereal/LocalLive.git"})
+    data = authed.get("/api/system/update/check").json()
+    assert data["repo"] == "heyhey2thereal/LocalLive"
+    assert data["branch"]  # a branch is always reported (defaults to main)
+
+
+def test_update_check_normalizes_ssh_url(authed):
+    authed.put("/api/broadcast/settings", json={"update_repo": "git@github.com:owner/repo.git"})
+    data = authed.get("/api/system/update/check").json()
+    assert data["repo"] == "owner/repo"
 
 
 def test_update_command_missing_returns_manual_hint(authed):

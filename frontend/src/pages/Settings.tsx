@@ -48,14 +48,11 @@ export default function Settings() {
   const [updateOpen, setUpdateOpen] = useState(false)
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'updating' | 'done'>('idle')
   const [updateMsg, setUpdateMsg] = useState('')
-  const [updateCheck, setUpdateCheck] = useState<{ current: string; latest: string | null; update_available: boolean } | null>(null)
-  const [updateRepo, setUpdateRepo] = useState('')
-  const [updateBranch, setUpdateBranch] = useState('main')
-  const [savingUpdate, setSavingUpdate] = useState(false)
+  const [updateCheck, setUpdateCheck] = useState<{ current: string; latest: string | null; update_available: boolean; repo: string; branch: string } | null>(null)
 
   const checkUpdate = useCallback(async () => {
     try {
-      const data = await api.get<{ current: string; latest: string | null; update_available: boolean; repo: string }>(
+      const data = await api.get<{ current: string; latest: string | null; update_available: boolean; repo: string; branch: string }>(
         '/api/system/update/check',
       )
       setUpdateCheck(data)
@@ -77,8 +74,6 @@ export default function Settings() {
       setLogs(l.lines)
       setFfmpeg(f)
       setVersion(v)
-      setUpdateRepo(s.update_repo ?? '')
-      setUpdateBranch(s.update_branch ?? 'main')
     } catch (err: any) {
       push({ kind: 'err', title: 'Chargement impossible', message: err?.message })
     } finally {
@@ -86,19 +81,6 @@ export default function Settings() {
     }
     void checkUpdate()
   }, [push, checkUpdate])
-
-  const saveUpdateConfig = async () => {
-    setSavingUpdate(true)
-    try {
-      await api.put('/api/broadcast/settings', { update_repo: updateRepo, update_branch: updateBranch })
-      push({ kind: 'ok', title: 'Configuration de mise à jour enregistrée' })
-      await checkUpdate()
-    } catch (err: any) {
-      push({ kind: 'err', title: 'Enregistrement impossible', message: err?.message })
-    } finally {
-      setSavingUpdate(false)
-    }
-  }
 
   useEffect(() => {
     void load()
@@ -262,32 +244,13 @@ export default function Settings() {
                   Nouvelle version disponible : <strong>v{updateCheck.latest}</strong>.
                 </>
               )}
-              {updateCheck && !updateCheck.latest && (
-                <> Renseignez le dépôt ci-dessous pour vérifier les mises à jour.</>
-              )}
             </p>
-            <div className="field">
-              <label>Dépôt de mise à jour (owner/repo ou URL git)</label>
-              <input
-                className="input mono"
-                value={updateRepo}
-                placeholder="heyhey2thereal/LocalLive"
-                onChange={(e) => setUpdateRepo(e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label>Branche à suivre</label>
-              <input
-                className="input mono"
-                value={updateBranch}
-                placeholder="feature/locallive-app"
-                onChange={(e) => setUpdateBranch(e.target.value)}
-              />
-            </div>
+            <p className="text-sm muted-2 mb-8">
+              {updateCheck?.repo
+                ? `Source de mise à jour configurée sur le serveur (${updateCheck.repo} · ${updateCheck.branch}).`
+                : "Aucune source de mise à jour configurée sur le serveur : relancez install.sh pour la définir."}
+            </p>
             <div className="flex gap-8">
-              <button className="btn" onClick={saveUpdateConfig} disabled={savingUpdate}>
-                {savingUpdate && <Spinner />} Enregistrer
-              </button>
               <button className="btn btn-ghost" onClick={checkUpdate}>
                 <IconRefresh size={15} /> Vérifier
               </button>
