@@ -309,3 +309,22 @@ def test_scene_rejects_bad_animations(authed):
     assert authed.post("/api/scenes", json={
         "name": "S", "layers": [{"type": "text", "text": "x", "anim_loop": "nope"}],
     }).status_code == 422
+
+
+def test_countdown_render(installed, tmp_path):
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('CD', 1)")
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        ("CD", 320, 240, "#101020",
+         '[{"type":"countdown","countdown_seconds":90,"countdown_mode":"down","x":20,"y":40,"font_size":60,"color":"#00ff88"}]'),
+    )
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, sid, 0, 2.0))
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    out = tmp_path / "cd.ts"
+    cmd, _ = engine._build_command(items, OutputConfig(kind="file", file_path=str(out), width=320, height=240, fps=25, realtime=False))
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-1500:]
+    from app import probe
+    info = probe.probe(out)
+    assert info["width"] == 320 and info["height"] == 240
