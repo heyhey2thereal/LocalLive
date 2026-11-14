@@ -39,6 +39,12 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Surveillance **CPU, RAM, stockage** et état de la connexion RTMP.
 - Journal du moteur FFmpeg en temps réel.
 
+### Utilisateurs et permissions
+- Trois rôles : **administrateur**, **opérateur**, **observateur**.
+- Droits fins par utilisateur (consulter, média, playlists, scènes, diffusion,
+  flux, programmation, utilisateurs, paramètres).
+- Garde-fous : impossible de rétrograder ou supprimer le dernier administrateur.
+
 ### Médiathèque
 - Import par **glisser-déposer** de vidéos, audio et images (multiple).
 - Analyse automatique par **FFprobe** : durée, résolution, codecs, débit.
@@ -65,8 +71,11 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Calque **« code »** : chaîne de filtres FFmpeg personnalisée (échappée côté serveur).
 
 ### Aperçu / Programme
-- Deux fenêtres côte à côte : **Aperçu** (playlist choisie) et **Programme** (à l'antenne).
+- **Switcher type OBS** : moniteurs **Aperçu** et **Programme** côte à côte, rendu
+  réel de la scène (calques) ou du média.
+- Choix de la **transition** de prise d'antenne.
 - **Prise d'antenne** en un clic (bascule de playlist sans couper la diffusion).
+- **Ouverture du rendu dans une fenêtre séparée** (moniteur déporté).
 - Liste des **sorties actives**.
 
 ### Flux de sortie
@@ -305,14 +314,15 @@ pip install pytest httpx
 cd backend && python -m pytest ../tests -q
 ```
 
-La suite (**75 tests**) couvre : authentification et assistant, médiathèque
+La suite (**89 tests**) couvre : authentification et assistant, médiathèque
 (import, analyse, vignettes, plages, dossiers), playlists et réordonnancement,
 scènes (calques étendus), programmation, diffusion (démarrage/arrêt, réglages,
 masquage de la clé), métriques système, **effets** (transitions, musique de fond,
-calques réactifs et code, fan-out) et **flux de sortie** (CRUD, validation,
-catalogue, aperçu/programme), ainsi que le **moteur FFmpeg réel** (copie directe,
-encodage mixte, transitions, boucle, récupération). Les tests génèrent leurs
-propres médias avec FFmpeg.
+calques réactifs et code, fan-out), **flux de sortie** (CRUD, validation,
+catalogue, aperçu/programme), **utilisateurs et permissions** (rôles, droits,
+garde-fous), la **version/journal**, ainsi que le **moteur FFmpeg réel** (copie
+directe, encodage mixte, transitions, boucle, récupération). Les tests génèrent
+leurs propres médias avec FFmpeg.
 
 ---
 
@@ -389,19 +399,21 @@ LocalLive/
 │       ├── probe.py      # FFprobe et vignettes
 │       ├── engine.py     # Moteur de diffusion FFmpeg 24/7 (xfade, fan-out)
 │       ├── fx.py         # Effets : animations, visualiseurs, transitions
+│       ├── permissions.py # Rôles et capacités
 │       ├── logging_setup.py
-│       └── routers/      # setup, auth, media, folders, playlists,
-│                         # scenes, streams, schedules, broadcast, meta, system
+│       └── routers/      # setup, auth, media, folders, playlists, scenes,
+│                         # streams, schedules, broadcast, users, meta, system
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── src/
 │       ├── main.tsx, App.tsx, api.ts, auth.tsx, i18n.ts, styles.css
 │       ├── lib/          # usePoll (polling sans chevauchement)
-│       ├── components/   # Layout, Logo, SceneCanvas, ui, icons
+│       ├── components/   # Layout, Logo, SceneCanvas, ProgramPreview, ui, icons
 │       └── pages/        # SetupWizard, Login, Dashboard, PreviewProgram,
-│                         # Streams, MediaLibrary, Playlists, Scenes,
-│                         # Scheduling, Settings
+│                         # ProgramWindow, Streams, MediaLibrary, Playlists,
+│                         # Scenes, Scheduling, Users, Settings
+├── CHANGELOG.md          # Journal des versions
 ├── scripts/common.sh     # Helpers des scripts (couleurs, spinners)
 └── tests/                # pytest : auth, média, playlists, effets,
                           # flux, moteur, diffusion
