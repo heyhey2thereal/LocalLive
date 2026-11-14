@@ -132,41 +132,7 @@ export default function PreviewProgram() {
       </div>
 
       <div className="switcher">
-        {/* PROGRAM */}
-        <div className="switcher-monitor">
-          <div className="switcher-head">
-            <span className="badge badge-live">
-              <span className="dot dot-live" /> PROGRAMME
-            </span>
-            <div className="flex gap-8 items-center">
-              <span className="text-sm muted-2">{program?.playlist_name || '—'}</span>
-              <button className="btn btn-ghost btn-icon" title="Ouvrir dans une fenêtre" onClick={() => openWindow('program')}>
-                <IconStreams size={15} />
-              </button>
-            </div>
-          </div>
-          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} height={293} reloadKey={reloadKey} />
-          <div className="switcher-foot">
-            <div className="flex gap-8 items-center">
-              {program?.running && program.items.length > 1 && (
-                <select className="select" value={programIndex} onChange={(e) => setProgramIndex(Number(e.target.value))}>
-                  {program.items.map((it, i) => (
-                    <option key={it.id} value={i}>
-                      {i + 1}. {it.title}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <span className="text-sm muted-2">
-              {program?.running
-                ? `${formatDuration(program.position)} / ${formatDuration(program.cycle_duration)}`
-                : '—'}
-            </span>
-          </div>
-        </div>
-
-        {/* PREVIEW */}
+        {/* PREVIEW (left) */}
         <div className="switcher-monitor">
           <div className="switcher-head">
             <span className="badge badge-info">APERÇU</span>
@@ -201,26 +167,59 @@ export default function PreviewProgram() {
                 ? `${preview.items.length} éléments · ${formatDuration(preview.duration)}`
                 : '—'}
             </span>
+            <button className="btn btn-primary" disabled={busy || !(selectedId || preview?.playlist_id)} onClick={take}>
+              <IconPlay size={16} /> {busy ? 'Prise d’antenne…' : 'Prendre l’antenne'}
+            </button>
+          </div>
+        </div>
+
+        {/* PROGRAM (right) */}
+        <div className="switcher-monitor">
+          <div className="switcher-head">
+            <span className="badge badge-live">
+              <span className="dot dot-live" /> PROGRAMME
+            </span>
+            <div className="flex gap-8 items-center">
+              <span className="text-sm muted-2">{program?.playlist_name || '—'}</span>
+              <button className="btn btn-ghost btn-icon" title="Ouvrir dans une fenêtre" onClick={() => openWindow('program')}>
+                <IconStreams size={15} />
+              </button>
+            </div>
+          </div>
+          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} height={293} reloadKey={reloadKey} />
+          <div className="switcher-foot">
+            <div className="flex gap-8 items-center">
+              {program?.running && program.items.length > 1 && (
+                <select className="select" value={programIndex} onChange={(e) => setProgramIndex(Number(e.target.value))}>
+                  {program.items.map((it, i) => (
+                    <option key={it.id} value={i}>
+                      {i + 1}. {it.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <span className="text-sm muted-2">
+              {program?.running
+                ? `${formatDuration(program.position)} / ${formatDuration(program.cycle_duration)}`
+                : '—'}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Transition bar */}
+      {/* Transition bar (applies to the next take) */}
       <div className="card mt-16 switcher-bar">
         <div className="flex gap-12 items-center grow">
-          <span className="text-sm muted-2 nowrap">Transition</span>
-          <select className="select" style={{ maxWidth: 220 }} value={transition} onChange={(e) => setTransition(e.target.value)}>
+          <span className="text-sm muted-2 nowrap">Transition de prise d'antenne</span>
+          <select className="select" style={{ maxWidth: 240 }} value={transition} onChange={(e) => setTransition(e.target.value)}>
             {(catalog?.transitions ?? []).map((tr) => (
               <option key={tr.id} value={tr.id}>
                 {tr.label}
               </option>
             ))}
           </select>
-          <span className="text-sm muted-2 nowrap">appliquée au premier élément de la playlist</span>
         </div>
-        <button className="btn btn-primary" disabled={busy || !(selectedId || preview?.playlist_id)} onClick={take}>
-          <IconPlay size={16} /> {busy ? 'Prise d’antenne…' : 'Prendre l’antenne'}
-        </button>
       </div>
 
       {/* Preview playlist contents */}

@@ -96,14 +96,16 @@ export default function Layout() {
           )
         })}
         <div className="nav-spacer" />
-        <div className="nav-live">
-          <span className="dot" />
-          <span className="truncate">{user?.username ?? '—'}</span>
+        <div className="nav-user">
+          <span className="nav-user-avatar">{(user?.username ?? '?').slice(0, 1).toUpperCase()}</span>
+          <div className="nav-user-info">
+            <span className="truncate nav-user-name">{user?.username ?? '—'}</span>
+            <span className="nav-user-role">{user?.role ?? 'viewer'}</span>
+          </div>
+          <button className="nav-user-logout" onClick={handleLogout} title={t('nav.logout')} aria-label={t('nav.logout')}>
+            <IconLogout size={17} />
+          </button>
         </div>
-        <button className="nav-item" onClick={handleLogout} style={{ width: '100%', textAlign: 'left' }}>
-          <IconLogout size={18} />
-          <span>{t('nav.logout')}</span>
-        </button>
         <button className="nav-version" onClick={showChangelog} title="Journal des versions">
           {version ? `v${version}` : '—'}
         </button>

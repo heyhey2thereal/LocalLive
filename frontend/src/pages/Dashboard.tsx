@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, type BroadcastStatus, type Playlist } from '../api'
+import { useState } from 'react'
+import { api, type BroadcastStatus } from '../api'
 import { usePoll } from '../lib/usePoll'
 import { useToast } from '../components/ui'
 import {
@@ -24,8 +24,6 @@ function MetricBar({ percent }: { percent: number }) {
 
 export default function Dashboard() {
   const { push } = useToast()
-  const [playlists, setPlaylists] = useState<Playlist[]>([])
-  const [selected, setSelected] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
 
   // Poll the full status: it carries the engine state, the system metrics and
@@ -36,20 +34,6 @@ export default function Dashboard() {
     2000,
   )
   const status = poll.data
-
-  const loadPlaylists = useCallback(async () => {
-    try {
-      const data = await api.get<{ items: Playlist[] }>('/api/playlists')
-      setPlaylists(data.items)
-      setSelected((prev) => prev || data.items[0]?.id || '')
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadPlaylists()
-  }, [loadPlaylists])
 
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
     setBusy(true)
@@ -186,29 +170,17 @@ export default function Dashboard() {
             </button>
           </div>
 
-          <div className="field">
-            <label>Playlist à diffuser</label>
-            <select
-              className="select"
-              value={selected}
-              onChange={(e) => setSelected(Number(e.target.value))}
-              disabled={engine.running}
-            >
-              {playlists.length === 0 && <option value="">Aucune playlist</option>}
-              {playlists.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.item_count} éléments)
-                </option>
-              ))}
-            </select>
-          </div>
+          <p className="text-sm muted mb-16">
+            La playlist diffusée se choisit dans <strong>Aperçu / Programme</strong>.
+          </p>
 
           <div className="flex gap-8 mb-16">
             {!engine.running ? (
               <button
                 className="btn btn-primary grow"
-                disabled={busy || !selected}
-                onClick={() => act(() => api.post('/api/broadcast/start', { playlist_id: selected }), 'Diffusion démarrée')}
+                disabled={busy}
+                onClick={() => act(() => api.post('/api/broadcast/start', {}), 'Diffusion démarrée')}
+                title="Démarre la playlist programmée ou de secours"
               >
                 <IconPlay size={16} /> Démarrer
               </button>

@@ -2,46 +2,47 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type Catalog, type LayerType, type Media, type Scene, type SceneLayer } from '../api'
 import SceneCanvas from '../components/SceneCanvas'
 import { SceneThumb } from '../components/ProgramPreview'
+import AddLayerMenu from '../components/AddLayerMenu'
 import { ConfirmDialog, EmptyState, Loading, Modal, useToast } from '../components/ui'
-import {
-  IconChat,
-  IconCode,
-  IconDuplicate,
-  IconLayers,
-  IconPlus,
-  IconRotate,
-  IconTrash,
-  IconZDown,
-  IconZUp,
-  IconZap,
-} from '../components/icons'
+import { IconDuplicate, IconLayers, IconPlus, IconRotate, IconTrash, IconZDown, IconZUp } from '../components/icons'
 
 // The editor canvas scales to the available space so the whole window fits
 // without scrolling. The scene keeps its own aspect ratio.
 const MAX_PREVIEW_W = 720
 
-const NEW_LAYER = (type: LayerType, z: number): SceneLayer => ({
-  type,
-  x: 60,
-  y: 60,
-  width: type === 'text' || type === 'overlay' ? undefined : 480,
-  height: type === 'text' || type === 'overlay' ? undefined : 270,
-  opacity: 1,
-  visible: true,
-  z,
-  rotation: 0,
-  text: type === 'text' ? 'Texte' : type === 'overlay' ? 'Bandeau' : null,
-  font_size: type === 'text' ? 64 : 36,
-  color: '#ffffff',
-  background: type === 'overlay' ? '#000000' : null,
-  media_id: null,
-  animation: 'none',
-  animation_speed: null,
-  visualizer: type === 'reactive' ? 'spectrum' : null,
-  code: type === 'code' ? 'hflip' : null,
-  chat_source: type === 'chat' ? 'chat' : null,
-  chat_lines: type === 'chat' ? 8 : undefined,
-})
+// Every layer gets an explicit size so it can never overflow the frame: text
+// and box layers are sized too (the font scales with the box).
+const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
+  const isBox = type === 'text' || type === 'overlay' || type === 'chat' || type === 'countdown'
+  return {
+    type,
+    x: 80,
+    y: 80,
+    width: isBox ? 600 : 480,
+    height: isBox ? 160 : 270,
+    opacity: 1,
+    visible: true,
+    z,
+    rotation: 0,
+    text: type === 'text' ? 'Votre texte' : type === 'overlay' ? 'Bandeau' : null,
+    font_size: type === 'text' ? 64 : type === 'countdown' ? 96 : type === 'chat' ? 28 : 36,
+    color: '#ffffff',
+    background: type === 'overlay' || type === 'chat' || type === 'countdown' ? '#000000' : null,
+    media_id: null,
+    animation: 'none',
+    anim_in: 'none',
+    anim_loop: 'none',
+    anim_out: 'none',
+    animation_speed: null,
+    visualizer: type === 'reactive' ? 'spectrum' : null,
+    code: type === 'code' ? 'hflip' : null,
+    chat_source: type === 'chat' ? 'chat' : null,
+    chat_lines: type === 'chat' ? 8 : undefined,
+    countdown_seconds: type === 'countdown' ? 60 : undefined,
+    countdown_mode: type === 'countdown' ? 'down' : undefined,
+    url: type === 'web' ? 'https://' : null,
+  }
+}
 
 export default function Scenes() {
   const { push } = useToast()
@@ -192,9 +193,13 @@ export default function Scenes() {
 
   const layer = editing && selectedLayer !== null ? editing.layers[selectedLayer] : null
   const mediaFor = (id?: number | null) => media.find((x) => x.id === id)
-  const animations = catalog?.animations ?? []
+  const layerTypes = catalog?.layer_types ?? []
+  const animIn = catalog?.anim_in ?? []
+  const animLoop = catalog?.anim_loop ?? []
+  const animOut = catalog?.anim_out ?? []
   const visualizers = catalog?.visualizers ?? []
   const codeExamples = catalog?.code_examples ?? []
+  const layerHelp = layer ? layerTypes.find((t) => t.id === layer.type)?.help : undefined
 
   return (
     <>
@@ -292,23 +297,10 @@ export default function Scenes() {
             </div>
             <div className="field">
               <label>Ajouter un calque</label>
-              <div className="flex gap-8" style={{ flexWrap: 'wrap' }}>
-                <button className="btn btn-sm" onClick={() => addLayer('text')}>
-                  + Texte
-                </button>
-                <button className="btn btn-sm" onClick={() => addLayer('image')}>
-                  + Image
-                </button>
-                <button className="btn btn-sm" onClick={() => addLayer('reactive')}>
-                  <IconZap size={14} /> Réactif
-                </button>
-                <button className="btn btn-sm" onClick={() => addLayer('chat')}>
-                  <IconChat size={14} /> Chat
-                </button>
-                <button className="btn btn-sm" onClick={() => addLayer('code')}>
-                  <IconCode size={14} /> Code
-                </button>
-              </div>
+              <AddLayerMenu
+                types={layerTypes}
+                onAdd={(id) => addLayer(id as LayerType)}
+              />
             </div>
           </div>
 
@@ -392,6 +384,7 @@ export default function Scenes() {
           {layer && (
             <div className="card mt-16">
               <div className="card-title mb-8">Calque sélectionné</div>
+              {layerHelp && <p className="hint mb-8">{layerHelp}</p>}
               <div className="grid grid-4">
                 <div className="field">
                   <label>Type</label>
@@ -407,6 +400,8 @@ export default function Scenes() {
                     <option value="logo">Logo</option>
                     <option value="reactive">Réactif (audio)</option>
                     <option value="chat">Chat box</option>
+                    <option value="countdown">Compte à rebours</option>
+                    <option value="web">URL web</option>
                     <option value="code">Code FFmpeg</option>
                   </select>
                 </div>
@@ -466,6 +461,51 @@ export default function Scenes() {
                   </div>
                 )}
 
+                {layer.type === 'countdown' && (
+                  <div className="field" style={{ gridColumn: 'span 3' }}>
+                    <label>Compte à rebours</label>
+                    <div className="flex gap-12 items-center">
+                      <div className="field" style={{ margin: 0 }}>
+                        <span className="text-sm muted-2">Départ (secondes)</span>
+                        <input
+                          className="input"
+                          type="number"
+                          min={1}
+                          value={layer.countdown_seconds ?? 60}
+                          onChange={(e) => updateLayer(selectedLayer!, { countdown_seconds: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="field" style={{ margin: 0 }}>
+                        <span className="text-sm muted-2">Sens</span>
+                        <select
+                          className="select"
+                          value={layer.countdown_mode ?? 'down'}
+                          onChange={(e) => updateLayer(selectedLayer!, { countdown_mode: e.target.value as 'up' | 'down' })}
+                        >
+                          <option value="down">Décompte</option>
+                          <option value="up">Comptage</option>
+                        </select>
+                      </div>
+                    </div>
+                    <span className="hint">Rendu par FFmpeg (drawtext avec expression temporelle).</span>
+                  </div>
+                )}
+
+                {layer.type === 'web' && (
+                  <div className="field" style={{ gridColumn: 'span 3' }}>
+                    <label>URL de l'image (http/https, png ou jpg)</label>
+                    <input
+                      className="input mono"
+                      value={layer.url ?? ''}
+                      onChange={(e) => updateLayer(selectedLayer!, { url: e.target.value })}
+                      placeholder="https://exemple.com/image.png"
+                    />
+                    <span className="hint">
+                      FFmpeg récupère l'image distante. Pour une page HTML, capturez-la d'abord en image.
+                    </span>
+                  </div>
+                )}
+
                 {layer.type === 'code' && (
                   <div className="field" style={{ gridColumn: 'span 3' }}>
                     <label>Code FFmpeg (filtres séparés par des virgules)</label>
@@ -485,7 +525,7 @@ export default function Scenes() {
                   </div>
                 )}
 
-                {layer.type !== 'text' && layer.type !== 'overlay' && layer.type !== 'code' && layer.type !== 'reactive' && layer.type !== 'chat' && (
+                {['image', 'video', 'logo'].includes(layer.type) && (
                   <div className="field">
                     <label>Média</label>
                     <select
@@ -504,13 +544,13 @@ export default function Scenes() {
                 )}
 
                 <div className="field">
-                  <label>Animation</label>
+                  <label>Animation d'entrée (IN)</label>
                   <select
                     className="select"
-                    value={layer.animation ?? 'none'}
-                    onChange={(e) => updateLayer(selectedLayer!, { animation: e.target.value })}
+                    value={layer.anim_in ?? 'none'}
+                    onChange={(e) => updateLayer(selectedLayer!, { anim_in: e.target.value })}
                   >
-                    {animations.map((a) => (
+                    {animIn.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.label}
                       </option>
@@ -518,9 +558,39 @@ export default function Scenes() {
                   </select>
                 </div>
 
-                {layer.animation && layer.animation !== 'none' && (
+                <div className="field">
+                  <label>Animation en boucle (LOOP)</label>
+                  <select
+                    className="select"
+                    value={layer.anim_loop ?? 'none'}
+                    onChange={(e) => updateLayer(selectedLayer!, { anim_loop: e.target.value })}
+                  >
+                    {animLoop.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label>Animation de sortie (OUT)</label>
+                  <select
+                    className="select"
+                    value={layer.anim_out ?? 'none'}
+                    onChange={(e) => updateLayer(selectedLayer!, { anim_out: e.target.value })}
+                  >
+                    {animOut.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {(layer.anim_in !== 'none' || layer.anim_loop !== 'none' || layer.anim_out !== 'none') && (
                   <div className="field">
-                    <label>Vitesse d'animation</label>
+                    <label>Vitesse / durée des animations</label>
                     <input
                       className="input"
                       type="number"

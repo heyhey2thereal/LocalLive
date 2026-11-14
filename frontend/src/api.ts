@@ -125,6 +125,8 @@ export type LayerType =
   | 'reactive'
   | 'code'
   | 'chat'
+  | 'countdown'
+  | 'web'
 
 export interface SceneLayer {
   type: LayerType
@@ -142,12 +144,20 @@ export interface SceneLayer {
   color?: string
   background?: string | null
   animation?: string
+  anim_in?: string
+  anim_loop?: string
+  anim_out?: string
   animation_speed?: number | null
   visualizer?: string | null
   code?: string | null
   // chat layer
   chat_source?: string | null
   chat_lines?: number
+  // countdown layer
+  countdown_seconds?: number
+  countdown_mode?: 'up' | 'down'
+  // web/url layer
+  url?: string | null
 }
 
 export interface Scene {
@@ -304,11 +314,20 @@ export interface CatalogOption {
   speed_default?: string | null
 }
 
+export interface LayerTypeInfo {
+  id: string
+  label: string
+  help: string
+}
+
 export interface Catalog {
   transitions: CatalogOption[]
   animations: CatalogOption[]
+  anim_in?: CatalogOption[]
+  anim_loop?: CatalogOption[]
+  anim_out?: CatalogOption[]
   visualizers: CatalogOption[]
-  layer_types: CatalogOption[]
+  layer_types: LayerTypeInfo[]
   code_examples: { label: string; code: string }[]
   roles?: { id: string; label: string; description: string }[]
   capabilities?: { id: string; label: string }[]
