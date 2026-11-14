@@ -18,4 +18,6 @@ data/
 .DS_Store
 .idea/
 .vscode/
+# Agent working notes (local only, not part of the published project)
+.openhands/
 frontend/tsconfig.tsbuildinfo

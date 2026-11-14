@@ -49,12 +49,15 @@ step_next "Installation des dépendances système"
 run_with_spinner "Mise à jour de la liste des paquets" \
   env DEBIAN_FRONTEND=noninteractive apt-get update -qq || die "apt-get update a échoué."
 
-PKGS=(python3 python3-venv python3-pip ffmpeg curl ca-certificates fonts-dejavu-core)
+# sqlite3 backs up the database safely (online .backup, WAL-aware); gnupg is
+# required by the NodeSource repository script on a minimal Debian container.
+PKGS=(python3 python3-venv python3-pip ffmpeg curl ca-certificates fonts-dejavu-core sqlite3 gnupg)
 run_with_spinner "Installation de Python, FFmpeg et outils" \
   env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}" \
   || die "L'installation des paquets système a échoué."
 
-if ! command -v node >/dev/null 2>&1 || [[ "$(node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')" -lt 18 ]]; then
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 \
+   || [[ "$(node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')" -lt 18 ]]; then
   log_info "Node.js 18+ absent — installation depuis NodeSource."
   run_with_spinner "Ajout du dépôt NodeSource" bash -c \
     "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -" \
@@ -168,9 +171,15 @@ LOCALLIVE_FRONTEND=${APP_DIR}/frontend/dist
 LOCALLIVE_HOST=${APP_HOST}
 LOCALLIVE_PORT=${APP_PORT}
 EOF
+  # The service runs as APP_USER, so the file must be readable by APP_GROUP:
+  # root:APP_GROUP with mode 0640 (readable by the service, not world-readable).
+  chown "root:${APP_GROUP}" "${CONF_DIR}/locallive.env"
   chmod 0640 "${CONF_DIR}/locallive.env"
   log_ok "Fichier de configuration créé : ${CONF_DIR}/locallive.env"
 else
+  # Repair ownership/permissions on re-run so an existing file stays readable.
+  chown "root:${APP_GROUP}" "${CONF_DIR}/locallive.env" 2>/dev/null || true
+  chmod 0640 "${CONF_DIR}/locallive.env" 2>/dev/null || true
   log_ok "Fichier de configuration conservé"
 fi
 
@@ -210,12 +219,27 @@ EOF
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
 systemctl restart "${SERVICE_NAME}"
-log_ok "Service ${SERVICE_NAME} activé et démarré"
+
+# Verify the service actually came up instead of assuming success.
+sleep 3
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+  log_ok "Service ${SERVICE_NAME} activé et démarré"
+else
+  log_error "Le service ${SERVICE_NAME} ne démarre pas."
+  log_dim "Dernières lignes du journal :"
+  journalctl -u "${SERVICE_NAME}" -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+  if journalctl -u "${SERVICE_NAME}" -n 40 --no-pager 2>/dev/null | grep -qi "namespace\|ProtectSystem\|PrivateTmp\|mount"; then
+    log_warn "Cause probable : durcissement systemd non supporté par ce conteneur LXC."
+    log_dim "Correctif : retirez les lignes ProtectSystem / ProtectHome / PrivateTmp de"
+    log_dim "/etc/systemd/system/${SERVICE_NAME}.service puis relancez :"
+    log_dim "  systemctl daemon-reload && systemctl restart ${SERVICE_NAME}"
+  fi
+  die "Installation interrompue : le service n'a pas démarré."
+fi
 
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
-sleep 2
 IP="$(detect_primary_ip)"
 printf "\n${C_GREEN}${C_BOLD}╭─────────────────────────────────────────────╮${C_RESET}\n"
 printf "${C_GREEN}${C_BOLD}│   Installation terminée avec succès         │${C_RESET}\n"

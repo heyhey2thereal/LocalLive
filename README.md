@@ -128,7 +128,7 @@ Le script réalise, avec une animation de progression :
 1. Vérification du système.
 2. Installation des dépendances (Python, FFmpeg, Node.js/npm, polices).
 3. Création de l'utilisateur système dédié `locallive`.
-4. Préparation des répertoires (`/opt/locallive`, `/var/lib/locallive`, `/var/log/locallive`).
+4. Préparation des répertoires (`/opt/locallive`, `/var/lib/locallive`).
 5. Déploiement du code et installation des dépendances Python (venv).
 6. **Compilation du frontend avec npm** (npm sert uniquement à la compilation).
 7. Initialisation de la base SQLite.
@@ -144,7 +144,7 @@ existante et conserve vos médias, playlists et réglages.
 |---------|--------|
 | Code applicatif | `/opt/locallive` |
 | Base + médias | `/var/lib/locallive` |
-| Journaux | `/var/log/locallive` |
+| Journaux | `/var/lib/locallive/logs` |
 | Configuration | `/etc/locallive/locallive.env` |
 | Sauvegardes | `/var/backups/locallive` |
 | Service | `locallive.service` |

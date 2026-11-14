@@ -25,7 +25,10 @@ APP_USER="${APP_USER:-locallive}"
 APP_GROUP="${APP_GROUP:-locallive}"
 APP_DIR="${APP_DIR:-/opt/locallive}"
 DATA_DIR="${DATA_DIR:-/var/lib/locallive}"
-LOG_DIR="${LOG_DIR:-/var/log/locallive}"
+# The application writes its rotating log under the data directory
+# (see backend/app/config.py: LOGS_DIR = DATA_DIR / "logs"), so LOG_DIR is
+# derived to keep the installer, the systemd unit and the code consistent.
+LOG_DIR="${LOG_DIR:-${DATA_DIR}/logs}"
 CONF_DIR="${CONF_DIR:-/etc/locallive}"
 SERVICE_NAME="${SERVICE_NAME:-locallive}"
 APP_PORT="${APP_PORT:-8000}"
