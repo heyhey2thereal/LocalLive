@@ -766,12 +766,12 @@ class PlaybackEngine:
             lw = int(layer.get("width") or w)
             lh = int(layer.get("height") or h)
             chain = fx.visualizer_chain(kind, lw, lh, fps)
-            # Drive the visualiser from the item's own audio.
-            ai = add_input(["-t", f"{dur:.3f}", "-i", _SILENCE])
+            # Drive the visualiser from a dedicated audio source (the item's own
+            # audio is not exposed as a separate label at this stage).
+            ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
             filters.append(f"[{ai}:a]aformat=channel_layouts=stereo,{chain}[viz{n}_{layer_index}]")
             filters.append(
-                f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:"
-                f"format=auto,colorchannelmixer=aa={opacity:.3f},format=yuv420p{out_label}"
+                f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}"
             )
             return True
 
