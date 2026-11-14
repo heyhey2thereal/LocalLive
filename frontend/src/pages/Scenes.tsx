@@ -53,6 +53,7 @@ export default function Scenes() {
   const [editing, setEditing] = useState<Scene | null>(null)
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null)
   const [toDelete, setToDelete] = useState<Scene | null>(null)
+  const [fullscreenMedia, setFullscreenMedia] = useState<Media | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -528,18 +529,32 @@ export default function Scenes() {
                 {['image', 'video', 'logo'].includes(layer.type) && (
                   <div className="field">
                     <label>Média</label>
-                    <select
-                      className="select"
-                      value={layer.media_id ?? ''}
-                      onChange={(e) => updateLayer(selectedLayer!, { media_id: e.target.value ? Number(e.target.value) : null })}
-                    >
-                      <option value="">— Choisir —</option>
-                      {media.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.title}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex gap-8 items-center">
+                      <select
+                        className="select grow"
+                        value={layer.media_id ?? ''}
+                        onChange={(e) => updateLayer(selectedLayer!, { media_id: e.target.value ? Number(e.target.value) : null })}
+                      >
+                        <option value="">— Choisir —</option>
+                        {media.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title}
+                          </option>
+                        ))}
+                      </select>
+                      {layer.media_id && (
+                        <button
+                          className="btn btn-sm"
+                          title="Afficher en plein écran"
+                          onClick={() => {
+                            const m = media.find((x) => x.id === layer.media_id)
+                            if (m) setFullscreenMedia(m)
+                          }}
+                        >
+                          ⛶
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -661,6 +676,18 @@ export default function Scenes() {
                   <label>Ordre (z)</label>
                   <input className="input" type="number" value={layer.z ?? 0} onChange={(e) => updateLayer(selectedLayer!, { z: Number(e.target.value) })} />
                 </div>
+                <div className="field">
+                  <label>Flou ({layer.blur ?? 0})</label>
+                  <input
+                    className="input"
+                    type="range"
+                    min={0}
+                    max={40}
+                    step={1}
+                    value={layer.blur ?? 0}
+                    onChange={(e) => updateLayer(selectedLayer!, { blur: Number(e.target.value) })}
+                  />
+                </div>
                 {(layer.type === 'text' || layer.type === 'overlay') && (
                   <>
                     <div className="field">
@@ -689,6 +716,19 @@ export default function Scenes() {
             </div>
           )}
         </Modal>
+      )}
+
+      {fullscreenMedia && (
+        <div className="media-fullscreen" onClick={() => setFullscreenMedia(null)}>
+          {fullscreenMedia.kind === 'video' ? (
+            <video src={fullscreenMedia.stream_url} controls autoPlay onClick={(e) => e.stopPropagation()} />
+          ) : (
+            <img src={fullscreenMedia.stream_url} alt={fullscreenMedia.title} onClick={(e) => e.stopPropagation()} />
+          )}
+          <button className="media-fullscreen-close" onClick={() => setFullscreenMedia(null)} aria-label="Fermer">
+            ×
+          </button>
+        </div>
       )}
 
       {toDelete && (

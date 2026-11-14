@@ -37,6 +37,8 @@ def _row_to_media(row) -> dict[str, Any]:
     else:
         d["thumbnail_url"] = None
     d["stream_url"] = f"/api/media/{d['id']}/stream"
+    # Medium-resolution cached image: fast to load and sharp enough to enlarge.
+    d["preview_url"] = f"/api/media/{d['id']}/preview"
     return d
 
 
@@ -239,6 +241,30 @@ def thumbnail(media_id: int) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail="Vignette introuvable")
     return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get("/{media_id}/preview")
+def preview(media_id: int, w: int = 960):
+    """Medium-resolution JPEG (cached) used by the editor and the switcher.
+
+    Generated on first request and kept under `previews/`; subsequent requests
+    are served straight from disk. This keeps the displayed image sharp while
+    loading far faster than the original file.
+    """
+    row = db.query_one("SELECT path, kind, duration FROM media WHERE id = ?", (media_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Média introuvable")
+    width = max(160, min(int(w), 1920))
+    name = f"{media_id}-{width}.jpg"
+    dest = config.PREVIEWS_DIR / name
+    if not dest.exists():
+        src = Path(row["path"])
+        if not src.exists():
+            raise HTTPException(status_code=404, detail="Fichier introuvable")
+        ok = probe.make_preview(src, dest, row["kind"], row["duration"] or 0, width)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Aperçu indisponible")
+    return FileResponse(dest, media_type="image/jpeg")
 
 
 def _range_stream(path: Path, request: Request, content_type: str) -> StreamingResponse:

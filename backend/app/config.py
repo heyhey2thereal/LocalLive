@@ -23,6 +23,7 @@ def _resolve_data_dir() -> Path:
 DATA_DIR = _resolve_data_dir()
 MEDIA_DIR = DATA_DIR / "media"
 THUMBS_DIR = DATA_DIR / "thumbs"
+PREVIEWS_DIR = DATA_DIR / "previews"
 LOGS_DIR = DATA_DIR / "logs"
 TMP_DIR = DATA_DIR / "tmp"
 DB_PATH = DATA_DIR / "locallive.db"
@@ -52,5 +53,5 @@ LOG_BACKUPS = int(os.environ.get("LOCALLIVE_LOG_BACKUPS", "3"))
 
 
 def ensure_dirs() -> None:
-    for d in (DATA_DIR, MEDIA_DIR, THUMBS_DIR, LOGS_DIR, TMP_DIR):
+    for d in (DATA_DIR, MEDIA_DIR, THUMBS_DIR, PREVIEWS_DIR, LOGS_DIR, TMP_DIR):
         d.mkdir(parents=True, exist_ok=True)

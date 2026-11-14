@@ -56,6 +56,8 @@ class Layer(BaseModel):
     countdown_mode: str = "down"
     # Web/URL layer (image fetched over HTTP).
     url: str | None = None
+    # Gaussian blur radius (0 = none).
+    blur: float = 0
 
     @field_validator("anim_in")
     @classmethod

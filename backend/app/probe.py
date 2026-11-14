@@ -139,6 +139,39 @@ def make_thumbnail(src: str | Path, dest: str | Path, kind: str, duration: float
         return False
 
 
+def make_preview(src: str | Path, dest: str | Path, kind: str, duration: float, width: int = 960) -> bool:
+    """Extract a medium-resolution JPEG (default 960px wide).
+
+    This is the size the editor and switcher actually display: far lighter than
+    the full-resolution source (fast to load) yet sharp enough to look clean when
+    a layer is enlarged. Generated once and cached on disk.
+    """
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "audio":
+        cmd = [
+            config.FFMPEG_BIN, "-y", "-v", "error",
+            "-i", str(src), "-an",
+            "-vf", f"scale={width}:-1:flags=lanczos",
+            "-frames:v", "1", "-q:v", "3",
+            str(dest),
+        ]
+    else:
+        seek = "0" if duration <= 0 else str(min(max(duration * 0.1, 0), 5))
+        cmd = [
+            config.FFMPEG_BIN, "-y", "-v", "error",
+            "-ss", seek, "-i", str(src),
+            "-vf", f"scale={width}:-1:flags=lanczos",
+            "-frames:v", "1", "-q:v", "3",
+            str(dest),
+        ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        return proc.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def ffmpeg_version() -> str | None:
     try:
         proc = subprocess.run(

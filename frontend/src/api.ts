@@ -76,6 +76,7 @@ export interface Media {
   has_audio: boolean
   thumbnail_url: string | null
   stream_url: string
+  preview_url?: string
   folder_id: number | null
   category: string | null
   created_at: string
@@ -158,6 +159,8 @@ export interface SceneLayer {
   countdown_mode?: 'up' | 'down'
   // web/url layer
   url?: string | null
+  // visual effects
+  blur?: number
 }
 
 export interface Scene {

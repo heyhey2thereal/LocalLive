@@ -54,9 +54,13 @@ export function SceneRender({
           const isBox = isText || l.type === 'chat' || l.type === 'countdown'
           const badge = layerBadge(l)
           const isMedia = l.type === 'image' || l.type === 'video' || l.type === 'logo'
-          // Thumbnails load instantly for small renders (list, switcher); the
-          // full-resolution stream is used for large renders (pop-out window).
-          const imgSrc = isMedia && m ? (preferThumb ? m.thumbnail_url ?? m.stream_url : m.stream_url ?? m.thumbnail_url) : null
+          // The cached medium-resolution preview loads fast and stays sharp; the
+          // small list uses the lighter thumbnail.
+          const imgSrc = isMedia && m
+            ? preferThumb
+              ? m.thumbnail_url ?? m.preview_url ?? m.stream_url
+              : m.preview_url ?? m.stream_url ?? m.thumbnail_url
+            : null
           return (
             <div
               key={i}

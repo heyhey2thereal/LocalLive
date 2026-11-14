@@ -839,11 +839,15 @@ class PlaybackEngine:
             lh = int(layer.get("height") or h)
             # `force_original_aspect_ratio=decrease` keeps the whole image inside
             # the box (never overflowing the frame); a transparent pad centres it.
-            filters.append(
-                f"[{li}:v]scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
-                f"pad={lw}:{lh}:(ow-iw)/2:(oh-ih)/2:color=#00000000,"
-                f"format=rgba,colorchannelmixer=aa={opacity:.3f}[lyr{n}_{layer_index}]"
+            chain = (
+                f"scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
+                f"pad={lw}:{lh}:(ow-iw)/2:(oh-ih)/2:color=#00000000"
             )
+            blur = float(layer.get("blur") or 0)
+            if blur > 0:
+                chain += f",gblur=sigma={blur:.1f}"
+            chain += f",format=rgba,colorchannelmixer=aa={opacity:.3f}"
+            filters.append(f"[{li}:v]{chain}[lyr{n}_{layer_index}]")
             filters.append(f"{src}[lyr{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
             return True
         return False
