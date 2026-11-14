@@ -9,6 +9,8 @@ import {
   IconPlus,
   IconRotate,
   IconTrash,
+  IconZDown,
+  IconZUp,
   IconZap,
 } from '../components/icons'
 
@@ -116,6 +118,30 @@ export default function Scenes() {
     setLayers(editing.layers.filter((_, i) => i !== index))
     setSelectedLayer(null)
   }
+
+  const moveZ = (index: number, dir: -1 | 1) => {
+    if (!editing) return
+    const layer = editing.layers[index]
+    updateLayer(index, { z: (layer.z ?? 0) + dir })
+  }
+
+  // Quality-of-life: duplicate via Ctrl+D, delete via Delete/Backspace.
+  useEffect(() => {
+    if (!editing || selectedLayer === null) return
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        duplicateLayer(selectedLayer)
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        removeLayer(selectedLayer)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editing, selectedLayer])
 
   const saveScene = async () => {
     if (!editing) return
@@ -316,7 +342,27 @@ export default function Scenes() {
                   </div>
                   <button
                     className="btn btn-ghost btn-icon"
-                    title="Dupliquer"
+                    title="Descendre (z-1)"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      moveZ(i, -1)
+                    }}
+                  >
+                    <IconZDown size={15} />
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    title="Monter (z+1)"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      moveZ(i, 1)
+                    }}
+                  >
+                    <IconZUp size={15} />
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    title="Dupliquer (Ctrl+D)"
                     onClick={(e) => {
                       e.stopPropagation()
                       duplicateLayer(i)

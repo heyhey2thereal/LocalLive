@@ -244,6 +244,18 @@ export const IconTransition = ({ size = 16, className }: P) => (
   </svg>
 )
 
+export const IconZUp = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </svg>
+)
+
+export const IconZDown = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M12 5v14M6 13l6 6 6-6" />
+  </svg>
+)
+
 export const IconUsers = ({ size = 18, className }: P) => (
   <svg {...base(size)} className={className}>
     <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
