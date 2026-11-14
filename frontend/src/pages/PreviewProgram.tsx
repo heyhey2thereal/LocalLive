@@ -1,25 +1,43 @@
+// OBS-style Preview / Program switcher.
+//
+// Left: PROGRAM (what is on air). Right: PREVIEW (the next playlist). A
+// transition picker selects how the take will look, and "Prendre l'antenne"
+// switches the live playlist. Each monitor has a pop-out button that opens the
+// render in a separate browser window.
+
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Playlist, type PreviewData } from '../api'
+import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } from '../api'
 import { usePoll } from '../lib/usePoll'
+import ProgramPreview from '../components/ProgramPreview'
 import { EmptyState, formatDuration, Loading, useToast } from '../components/ui'
-import { IconPlay, IconSignal, IconStreams } from '../components/icons'
+import { IconPlay, IconStreams, IconZap } from '../components/icons'
 
 export default function PreviewProgram() {
   const { push } = useToast()
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selectedId, setSelectedId] = useState<number | ''>('')
-  const [taking, setTaking] = useState(false)
+  const [transition, setTransition] = useState('fade')
+  const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [busy, setBusy] = useState(false)
+  const [programIndex, setProgramIndex] = useState(0)
 
   const poll = usePoll<PreviewData>(
-    (signal) => api.get<PreviewData>('/api/broadcast/preview' + (selectedId ? `?playlist_id=${selectedId}` : ''), signal),
+    (signal) =>
+      api.get<PreviewData>(
+        '/api/broadcast/preview' + (selectedId ? `?playlist_id=${selectedId}` : ''),
+        signal,
+      ),
     2500,
   )
 
   const loadPlaylists = useCallback(async () => {
     try {
-      const data = await api.get<{ items: Playlist[] }>('/api/playlists')
+      const [data, cat] = await Promise.all([
+        api.get<{ items: Playlist[] }>('/api/playlists'),
+        api.get<Catalog>('/api/meta/catalog').catch(() => null),
+      ])
       setPlaylists(data.items)
+      setCatalog(cat)
     } catch {
       /* ignore */
     }
@@ -33,64 +51,137 @@ export default function PreviewProgram() {
   const preview = poll.data?.preview
   const outputs = poll.data?.outputs ?? []
 
+  // Which program item is shown on the monitor (default: the live one).
+  const programItem: EngineItem | null =
+    program?.running && program.items.length > 0
+      ? program.items[Math.min(programIndex, program.items.length - 1)]
+      : program?.current ?? null
+
   const take = async () => {
     const target = selectedId || preview?.playlist_id
     if (!target) return
-    setTaking(true)
     setBusy(true)
     try {
       await api.post('/api/broadcast/take', { playlist_id: target })
       push({ kind: 'ok', title: 'Prise d’antenne effectuée' })
+      setProgramIndex(0)
       poll.refresh()
     } catch (err: any) {
       push({ kind: 'err', title: 'Prise d’antenne impossible', message: err?.message })
     } finally {
-      setTaking(false)
       setBusy(false)
     }
+  }
+
+  const openWindow = (which: 'program' | 'preview') => {
+    const params = new URLSearchParams({ view: which })
+    if (which === 'preview' && selectedId) params.set('playlist_id', String(selectedId))
+    window.open(`/program?${params.toString()}`, `locallive-${which}`, 'width=960,height=620')
   }
 
   if (poll.loading && !program) return <Loading />
 
   return (
     <>
-      <div className="grid grid-2" style={{ gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
-        {/* Aperçu (preview) */}
-        <div className="card">
+      <div className="switcher">
+        {/* PROGRAM */}
+        <div className="switcher-monitor">
+          <div className="switcher-head">
+            <span className="badge badge-live">
+              <span className="dot dot-live" /> PROGRAMME
+            </span>
+            <div className="flex gap-8 items-center">
+              <span className="text-sm muted-2">{program?.playlist_name || '—'}</span>
+              <button className="btn btn-ghost btn-icon" title="Ouvrir dans une fenêtre" onClick={() => openWindow('program')}>
+                <IconStreams size={15} />
+              </button>
+            </div>
+          </div>
+          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} height={293} />
+          <div className="switcher-foot">
+            <div className="flex gap-8 items-center">
+              {program?.running && program.items.length > 1 && (
+                <select className="select" value={programIndex} onChange={(e) => setProgramIndex(Number(e.target.value))}>
+                  {program.items.map((it, i) => (
+                    <option key={it.id} value={i}>
+                      {i + 1}. {it.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <span className="text-sm muted-2">
+              {program?.running
+                ? `${formatDuration(program.position)} / ${formatDuration(program.cycle_duration)}`
+                : '—'}
+            </span>
+          </div>
+        </div>
+
+        {/* PREVIEW */}
+        <div className="switcher-monitor">
+          <div className="switcher-head">
+            <span className="badge badge-info">APERÇU</span>
+            <div className="flex gap-8 items-center">
+              <select
+                className="select"
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">— Choisir une playlist —</option>
+                {playlists.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.item_count})
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-ghost btn-icon" title="Ouvrir dans une fenêtre" onClick={() => openWindow('preview')}>
+                <IconStreams size={15} />
+              </button>
+            </div>
+          </div>
+          <ProgramPreview
+            item={preview?.items[0] ?? null}
+            emptyLabel="Aucune playlist sélectionnée"
+            width={520}
+            height={293}
+          />
+          <div className="switcher-foot">
+            <span className="text-sm muted-2">
+              {preview && preview.items.length > 0
+                ? `${preview.items.length} éléments · ${formatDuration(preview.duration)}`
+                : '—'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Transition bar */}
+      <div className="card mt-16 switcher-bar">
+        <div className="flex gap-12 items-center grow">
+          <span className="text-sm muted-2 nowrap">Transition</span>
+          <select className="select" style={{ maxWidth: 220 }} value={transition} onChange={(e) => setTransition(e.target.value)}>
+            {(catalog?.transitions ?? []).map((tr) => (
+              <option key={tr.id} value={tr.id}>
+                {tr.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-sm muted-2 nowrap">appliquée au premier élément de la playlist</span>
+        </div>
+        <button className="btn btn-primary" disabled={busy || !(selectedId || preview?.playlist_id)} onClick={take}>
+          <IconPlay size={16} /> {busy ? 'Prise d’antenne…' : 'Prendre l’antenne'}
+        </button>
+      </div>
+
+      {/* Preview playlist contents */}
+      {preview && preview.items.length > 0 && (
+        <div className="card mt-16">
           <div className="card-head">
-            <span className="card-title">Aperçu</span>
-            <select
-              className="select"
-              style={{ maxWidth: 260 }}
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : '')}
-            >
-              <option value="">— Choisir une playlist —</option>
-              {playlists.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.item_count})
-                </option>
-              ))}
-            </select>
+            <span className="card-title">Contenu de l'aperçu</span>
           </div>
-          <div className="stage">
-            {preview && preview.items.length > 0 ? (
-              <div className="stage-empty" style={{ gap: 6 }}>
-                <IconSignal size={30} />
-                <span style={{ fontWeight: 600 }}>{preview.playlist_name}</span>
-                <span className="text-sm muted-2">
-                  {preview.items.length} éléments · {formatDuration(preview.duration)}
-                </span>
-              </div>
-            ) : (
-              <div className="stage-empty">
-                <IconSignal size={30} />
-                <span>Aucune playlist sélectionnée</span>
-              </div>
-            )}
-          </div>
-          <div className="list mt-16" style={{ maxHeight: 220, overflowY: 'auto' }}>
-            {preview?.items.map((item, i) => (
+          <div className="list" style={{ maxHeight: 200, overflowY: 'auto' }}>
+            {preview.items.map((item, i) => (
               <div key={item.id} className="row" style={{ padding: '6px 10px' }}>
                 <span className="text-sm muted-2" style={{ width: 20 }}>
                   {i + 1}
@@ -104,60 +195,11 @@ export default function PreviewProgram() {
               </div>
             ))}
           </div>
-          <div className="mt-16">
-            <button className="btn btn-primary" disabled={busy || !(selectedId || preview?.playlist_id)} onClick={take}>
-              <IconPlay size={16} /> {taking ? 'Prise d’antenne…' : 'Prendre l’antenne'}
-            </button>
-          </div>
         </div>
+      )}
 
-        {/* Programme (on air) */}
-        <div className="card">
-          <div className="card-head">
-            <span className="card-title">Programme</span>
-            {program?.running && (
-              <span className="badge badge-live">
-                <span className="dot dot-live" /> EN DIRECT
-              </span>
-            )}
-          </div>
-          <div className="stage">
-            {program?.running ? (
-              <div className="stage-empty" style={{ gap: 6 }}>
-                <span className="dot dot-live" />
-                <span style={{ fontWeight: 600 }}>{program.current?.title ?? '—'}</span>
-                <span className="text-sm muted-2">
-                  {formatDuration(program.position)} / {formatDuration(program.cycle_duration)}
-                </span>
-              </div>
-            ) : (
-              <div className="stage-empty">
-                <IconSignal size={30} />
-                <span>La diffusion est à l'arrêt</span>
-              </div>
-            )}
-          </div>
-          <div className="list mt-16">
-            <div className="flex justify-between items-center" style={{ padding: '4px 0' }}>
-              <span className="text-sm muted-2">Playlist</span>
-              <span className="text-sm">{program?.playlist_name || '—'}</span>
-            </div>
-            <div className="flex justify-between items-center" style={{ padding: '4px 0' }}>
-              <span className="text-sm muted-2">Élément</span>
-              <span className="text-sm">
-                {program ? `${program.current_index + 1} / ${program.item_count}` : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between items-center" style={{ padding: '4px 0' }}>
-              <span className="text-sm muted-2">Pipeline</span>
-              <span className="text-sm">{program?.pipeline === 'copy' ? 'Copie directe' : 'Encodage'}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Sorties actives */}
-      <div className="card mt-24">
+      {/* Outputs */}
+      <div className="card mt-16">
         <div className="card-head">
           <span className="card-title">
             <IconStreams size={16} /> Sorties actives
@@ -175,7 +217,7 @@ export default function PreviewProgram() {
                   <div className="row-title">
                     {o.name} {o.primary && <span className="badge badge-info">Principale</span>}
                   </div>
-                  <div className="row-sub mono truncate">{o.destination}</div>
+                  <div className="row-sub mono truncate">{o.destination || '—'}</div>
                 </div>
                 <span className="text-sm muted-2 nowrap">
                   {o.width}×{o.height}
@@ -185,6 +227,12 @@ export default function PreviewProgram() {
           </div>
         )}
       </div>
+
+      {program?.running && (
+        <div className="flex items-center gap-8 mt-16 muted text-sm">
+          <IconZap size={14} /> Diffusion en cours — pipeline {program.pipeline === 'copy' ? 'copie directe' : 'encodage'}
+        </div>
+      )}
     </>
   )
 }

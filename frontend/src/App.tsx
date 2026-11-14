@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import MediaLibrary from './pages/MediaLibrary'
 import Playlists from './pages/Playlists'
 import PreviewProgram from './pages/PreviewProgram'
+import ProgramWindow from './pages/ProgramWindow'
 import Scenes from './pages/Scenes'
 import Scheduling from './pages/Scheduling'
 import Settings from './pages/Settings'
@@ -39,6 +40,14 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route
+        path="/program"
+        element={
+          <Protected>
+            <ProgramWindow />
+          </Protected>
+        }
+      />
       <Route
         path="/"
         element={

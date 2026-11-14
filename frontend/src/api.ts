@@ -168,6 +168,7 @@ export interface Schedule {
 export interface EngineItem {
   id: number
   media_id: number | null
+  scene_id?: number | null
   title: string
   kind: string
   duration: number

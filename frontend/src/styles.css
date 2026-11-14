@@ -363,6 +363,30 @@ textarea {
 }
 .stage video, .stage img { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .stage-empty { color: var(--text-3); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+
+/* Switcher (Preview / Program) */
+.switcher { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .switcher { grid-template-columns: 1fr; } }
+.switcher-monitor {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.switcher-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.switcher-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
+.switcher-bar { display: flex; align-items: center; gap: 16px; padding: 12px 16px; }
+.program-tile {
+  position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius);
+  border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center;
+}
+.program-tile .scene-canvas { max-width: 100%; }
+
+/* Pop-out program window */
+.program-window { min-height: 100vh; background: #05070a; display: flex; flex-direction: column; }
+.program-window-bar {
+  display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+  background: var(--bg-1); border-bottom: 1px solid var(--line);
+}
+.program-window-stage { flex: 1; display: grid; place-items: center; padding: 12px; }
 .stage-live-tag {
   position: absolute; top: 12px; left: 12px;
   display: flex; align-items: center; gap: 7px;
