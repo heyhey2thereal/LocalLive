@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type Catalog, type LayerType, type Media, type Scene, type SceneLayer } from '../api'
 import SceneCanvas from '../components/SceneCanvas'
 import { ConfirmDialog, EmptyState, Loading, Modal, useToast } from '../components/ui'
@@ -12,7 +12,9 @@ import {
   IconZap,
 } from '../components/icons'
 
-const PREVIEW_W = 640
+// The editor canvas scales to the available space so the whole window fits
+// without scrolling. The scene keeps its own aspect ratio.
+const MAX_PREVIEW_W = 720
 
 const NEW_LAYER = (type: LayerType, z: number): SceneLayer => ({
   type,
@@ -66,6 +68,14 @@ export default function Scenes() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Recompute the canvas size when the window changes so it keeps fitting.
+  const [viewport, setViewport] = useState(0)
+  useEffect(() => {
+    const onResize = () => setViewport((v) => v + 1)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const newScene = () => {
     setEditing({ id: 0, name: 'Nouvelle scène', width: 1920, height: 1080, background: '#0b0d12', layers: [] })
@@ -136,6 +146,18 @@ export default function Scenes() {
     }
   }
 
+  // Size the canvas so it always fits the window height (minus chrome) as well
+  // as the available width, avoiding any scrollbar around the editor.
+  const previewWidth = useMemo(() => {
+    const w = editing?.width ?? 1920
+    const h = editing?.height ?? 1080
+    const byWidth = Math.min(MAX_PREVIEW_W, Math.max(window.innerWidth - 520, 240))
+    const maxH = Math.max(window.innerHeight - 340, 180)
+    const byHeight = maxH * (w / h)
+    return Math.round(Math.min(byWidth, byHeight))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.width, editing?.height, viewport])
+
   if (loading) return <Loading />
 
   const layer = editing && selectedLayer !== null ? editing.layers[selectedLayer] : null
@@ -195,7 +217,7 @@ export default function Scenes() {
         <Modal
           title={editing.id === 0 ? 'Nouvelle scène' : `Éditer : ${editing.name}`}
           onClose={() => setEditing(null)}
-          wide
+          full
           footer={
             <>
               <button className="btn" onClick={() => setEditing(null)}>
@@ -259,7 +281,7 @@ export default function Scenes() {
             </div>
           </div>
 
-          <div className="grid" style={{ gridTemplateColumns: '1fr 300px', gap: 16 }}>
+          <div className="scene-editor">
             <div className="scene-canvas-wrap">
               <SceneCanvas
                 width={editing.width}
@@ -267,17 +289,14 @@ export default function Scenes() {
                 background={editing.background}
                 layers={editing.layers}
                 selected={selectedLayer}
-                displayWidth={PREVIEW_W}
+                displayWidth={previewWidth}
                 mediaFor={mediaFor}
                 onSelect={setSelectedLayer}
                 onChange={setLayers}
               />
-              <div className="text-sm muted-2 mt-8">
-                Glissez pour déplacer · 8 poignées pour redimensionner · Maj = magnétisme · flèches = ajustement
-              </div>
             </div>
 
-            <div className="list">
+            <div className="list scene-layers-list">
               {editing.layers.length === 0 && <EmptyState title="Aucun calque" hint="Ajoutez un texte, une image, un visuel réactif ou du code." />}
               {editing.layers.map((l, i) => (
                 <div

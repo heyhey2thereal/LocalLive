@@ -473,6 +473,7 @@ textarea {
   animation: rise 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .modal.wide { max-width: 900px; }
+.modal.full { max-width: 1200px; max-height: 94vh; }
 .modal-head {
   padding: 18px 22px; border-bottom: 1px solid var(--line-soft);
   display: flex; align-items: center; justify-content: space-between;
@@ -571,9 +572,17 @@ textarea {
 }
 
 /* Scene editor */
+.scene-editor {
+  display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px;
+  align-items: start;
+}
+.scene-layers-list { max-height: 460px; overflow-y: auto; }
 .scene-canvas-wrap {
   background: #05070a; border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 14px; display: grid; place-items: center; overflow: auto;
+  padding: 14px; display: grid; place-items: center; overflow: hidden;
+}
+@media (max-width: 860px) {
+  .scene-editor { grid-template-columns: 1fr; }
 }
 .scene-canvas { position: relative; background: #000; overflow: hidden; }
 .scene-layer {

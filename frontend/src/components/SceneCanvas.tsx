@@ -1,9 +1,13 @@
 // Interactive scene editor canvas.
 //
 // Layers can be dragged to move and resized from eight handles (corners and
-// edge midpoints). Holding Shift snaps to a 10px grid; the arrow keys nudge the
-// selected layer (1px, or 10px with Shift). Everything works in scene
-// coordinates and is scaled to the displayed width.
+// edge midpoints). Holding Shift snaps to a 10px grid, Alt locks the aspect
+// ratio, and the arrow keys nudge the selected layer (1px, or 10px with Shift).
+// Everything works in scene coordinates and is scaled to the displayed width.
+//
+// A resize starts from the layer's *measured* on-screen size (not from a
+// hard-coded default), so layers that have no explicit width/height — such as
+// text — resize smoothly instead of collapsing to a sliver.
 
 import { useCallback, useEffect, useRef } from 'react'
 import type { SceneLayer } from '../api'
@@ -42,12 +46,15 @@ export default function SceneCanvas({
   onChange,
 }: Props) {
   const scale = displayWidth / width
+  const layerRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const drag = useRef<{
     index: number
     handle: Handle | 'move'
     startX: number
     startY: number
     orig: SceneLayer
+    baseW: number
+    baseH: number
   } | null>(null)
 
   const patchLayer = useCallback(
@@ -83,12 +90,20 @@ export default function SceneCanvas({
   const startDrag = (e: React.MouseEvent, index: number, handle: Handle | 'move') => {
     e.stopPropagation()
     onSelect(index)
+    const layer = layers[index]
+    // Measure the real rendered size so resizing starts from what the user sees.
+    const el = layerRefs.current.get(index)
+    const rect = el?.getBoundingClientRect()
+    const baseW = rect && rect.width > 0 ? rect.width / scale : layer.width ?? 200
+    const baseH = rect && rect.height > 0 ? rect.height / scale : layer.height ?? 100
     drag.current = {
       index,
       handle,
       startX: e.clientX,
       startY: e.clientY,
-      orig: { ...layers[index] },
+      orig: { ...layer },
+      baseW,
+      baseH,
     }
     const onMove = (ev: MouseEvent) => {
       const d = drag.current
@@ -96,6 +111,7 @@ export default function SceneCanvas({
       const dx = (ev.clientX - d.startX) / scale
       const dy = (ev.clientY - d.startY) / scale
       const shift = ev.shiftKey
+      const alt = ev.altKey
       if (d.handle === 'move') {
         patchLayer(d.index, {
           x: snap(d.orig.x + dx, shift),
@@ -103,25 +119,35 @@ export default function SceneCanvas({
         })
         return
       }
-      let { x, y } = d.orig
-      let w = d.orig.width ?? 200
-      let h = d.orig.height ?? 100
+      let x = d.orig.x
+      let y = d.orig.y
+      let w = d.baseW
+      let h = d.baseH
       const hnd = d.handle
       if (hnd.includes('w')) {
         x = d.orig.x + dx
-        w = (d.orig.width ?? 200) - dx
+        w = d.baseW - dx
       }
-      if (hnd.includes('e')) w = (d.orig.width ?? 200) + dx
+      if (hnd.includes('e')) w = d.baseW + dx
       if (hnd.includes('n')) {
         y = d.orig.y + dy
-        h = (d.orig.height ?? 100) - dy
+        h = d.baseH - dy
       }
-      if (hnd.includes('s')) h = (d.orig.height ?? 100) + dy
+      if (hnd.includes('s')) h = d.baseH + dy
+      // Clamp to the minimum size, keeping the anchored edge fixed.
       if (w < MIN_SIZE) {
+        if (hnd.includes('w')) x = d.orig.x + (d.baseW - MIN_SIZE)
         w = MIN_SIZE
       }
       if (h < MIN_SIZE) {
+        if (hnd.includes('n')) y = d.orig.y + (d.baseH - MIN_SIZE)
         h = MIN_SIZE
+      }
+      // Alt locks the aspect ratio on the corner handles.
+      if (alt && hnd.length === 2 && d.baseW > 0 && d.baseH > 0) {
+        const ratio = d.baseW / d.baseH
+        h = w / ratio
+        if (hnd.includes('n')) y = d.orig.y + (d.baseH - h)
       }
       patchLayer(d.index, {
         x: snap(x, shift),
@@ -156,6 +182,10 @@ export default function SceneCanvas({
           return (
             <div
               key={i}
+              ref={(el) => {
+                if (el) layerRefs.current.set(i, el)
+                else layerRefs.current.delete(i)
+              }}
               className={`scene-layer ${selected === i ? 'selected' : ''}`}
               style={{
                 left: l.x * scale,
@@ -171,6 +201,7 @@ export default function SceneCanvas({
                 zIndex: (l.z ?? 0) + 1,
               }}
               onMouseDown={(e) => startDrag(e, i, 'move')}
+              onClick={(e) => e.stopPropagation()}
             >
               {!isText && m?.thumbnail_url && <img src={m.thumbnail_url} alt="" draggable={false} />}
               {!isText && !m?.thumbnail_url && (
