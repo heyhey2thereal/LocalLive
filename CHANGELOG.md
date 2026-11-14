@@ -3,6 +3,30 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.9.0] — 2026-11-14
+
+### Corrigé
+- **Durée d'une scène dans une playlist** : l'API renvoyait `0` pour un élément
+  de type scène alors que le moteur joue la durée d'image par défaut — la
+  playlist affichait une durée fausse. Elle renvoie désormais la durée réelle.
+- **Réglages d'un élément écrasés** : modifier la transition (ou la musique de
+  fond) via `PATCH` remettait la **durée** à 0. Le `PATCH` ne touche plus que
+  les champs réellement envoyés.
+- **Fichiers d'aperçu orphelins** : supprimer un média (ou tout réinitialiser)
+  laissait les aperçus mis en cache (`previews/{id}-*.jpg`). Ils sont maintenant
+  nettoyés.
+
+### Ajouté
+- **Sauvegarde / restauration de la configuration** (Paramètres) : export d'un
+  fichier **JSON** (scènes, playlists, flux, programmes, dossiers, réglages —
+  sans les médias) et import additif. Utile pour cloner un poste ou archiver.
+- **Suppression groupée de médias** : cases de sélection sur les cartes, barre
+  d'action, suppression de plusieurs médias en un clic (`/api/media/bulk-delete`).
+- **Recherche** sur les pages **Scènes** et **Playlists** (filtre instantané).
+- **Statistiques de contenu** sur le Tableau de bord : nombre de médias (taille et
+  durée cumulée), scènes, playlists, flux (dont actifs), programmes, utilisateurs
+  (`/api/system/stats`).
+
 ## [2.8.0] — 2026-11-14
 
 ### Ajouté

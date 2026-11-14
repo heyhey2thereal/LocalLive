@@ -56,6 +56,19 @@ export const api = {
   upload: <T>(path: string, formData: FormData) => request<T>(path, { method: 'POST', formData }),
 }
 
+export interface ContentStats {
+  media: { count: number; bytes: number; seconds: number; by_kind: Record<string, number> }
+  scenes: number
+  playlists: number
+  playlist_items: number
+  streams: number
+  enabled_streams: number
+  schedules: number
+  folders: number
+  users: number
+  playlist_seconds: number
+}
+
 // ---------------------------------------------------------------------------
 // Shared types
 // ---------------------------------------------------------------------------

@@ -22,7 +22,9 @@ class PlaylistPayload(BaseModel):
 class ItemPayload(BaseModel):
     media_id: int | None = None
     scene_id: int | None = None
-    duration: float = Field(default=0, ge=0)
+    # None means "not provided" (used by PATCH so a missing field is left
+    # untouched); 0 is a valid explicit value meaning "use the default".
+    duration: float | None = Field(default=None, ge=0)
     transition: str | None = None
     transition_duration: float | None = Field(default=None, ge=0, le=30)
     background_audio_id: int | None = None
@@ -65,10 +67,17 @@ def _load_items(playlist_id: int) -> list[dict[str, Any]]:
            ORDER BY pi.position""",
         (playlist_id,),
     )
+    default_image = float(db.get_setting("image_duration", "5") or 5)
     items = []
     for r in rows:
         d = dict(r)
-        effective = d["duration"] or d["media_duration"] or (5 if d["media_kind"] == "image" else 0)
+        if d["scene_id"]:
+            # A scene has no intrinsic duration: it uses the item override or the
+            # global image duration, exactly like the engine does.
+            d["kind"] = "scene"
+            effective = d["duration"] or default_image
+        else:
+            effective = d["duration"] or d["media_duration"] or (default_image if d["media_kind"] == "image" else 0)
         d["effective_duration"] = round(effective, 3)
         d["transition"] = d.get("transition") or "cut"
         d["transition_duration"] = float(d.get("transition_duration") or 0)
@@ -94,9 +103,12 @@ def _playlist_dict(row) -> dict[str, Any]:
 
 
 @router.get("")
-def list_playlists(user: dict = Depends(current_user)) -> dict[str, Any]:
+def list_playlists(q: str | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_installed()
-    rows = db.query("SELECT * FROM playlists ORDER BY name")
+    if q:
+        rows = db.query("SELECT * FROM playlists WHERE name LIKE ? ORDER BY name", (f"%{q}%",))
+    else:
+        rows = db.query("SELECT * FROM playlists ORDER BY name")
     return {"items": [_playlist_dict(r) for r in rows]}
 
 
@@ -207,7 +219,7 @@ def add_item(
                                       transition, transition_duration, background_audio_id, background_volume)
            VALUES(?,?,?,?,?,?,?,?,?)""",
         (
-            playlist_id, payload.media_id, payload.scene_id, row["pos"], payload.duration,
+            playlist_id, payload.media_id, payload.scene_id, row["pos"], payload.duration or 0,
             payload.transition or "cut", payload.transition_duration or 0,
             payload.background_audio_id, payload.background_volume if payload.background_volume is not None else 0.15,
         ),
@@ -227,8 +239,13 @@ def update_item(
         "SELECT id FROM media WHERE id = ?", (payload.background_audio_id,)
     ):
         raise HTTPException(status_code=404, detail="Musique de fond introuvable")
-    fields = ["duration = ?"]
-    values: list[Any] = [payload.duration]
+    # Only touch the fields the caller actually sent: a PATCH that changes the
+    # transition must not reset the duration override to zero.
+    fields: list[str] = []
+    values: list[Any] = []
+    if payload.duration is not None:
+        fields.append("duration = ?")
+        values.append(payload.duration)
     if payload.transition is not None:
         fields.append("transition = ?")
         values.append(payload.transition)
@@ -241,8 +258,9 @@ def update_item(
     if payload.background_volume is not None:
         fields.append("background_volume = ?")
         values.append(payload.background_volume)
-    values.append(item_id)
-    db.execute(f"UPDATE playlist_items SET {', '.join(fields)} WHERE id = ?", tuple(values))
+    if fields:
+        values.append(item_id)
+        db.execute(f"UPDATE playlist_items SET {', '.join(fields)} WHERE id = ?", tuple(values))
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 

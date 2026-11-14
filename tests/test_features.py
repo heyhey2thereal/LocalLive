@@ -155,3 +155,93 @@ def test_skip_rotates_playlist(authed, tmp_path):
 
 def test_skip_requires_admin(installed):
     assert installed.post("/api/broadcast/next").status_code == 401
+
+
+# --- playlist duration fixes (2.9.0) --------------------------------------
+def test_scene_item_effective_duration_uses_default(authed):
+    # A scene has no intrinsic duration: the API must report the default, not 0,
+    # so the playlist shows the real length the engine will play.
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid})
+    item = authed.get(f"/api/playlists/{pid}").json()["items"][0]
+    assert item["effective_duration"] == 5.0
+
+
+def test_patch_transition_keeps_duration(authed):
+    # PATCHing only the transition must not reset the duration override to zero.
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid, "duration": 12})
+    item = authed.get(f"/api/playlists/{pid}").json()["items"][0]
+    authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"transition": "fade"})
+    after = authed.get(f"/api/playlists/{pid}").json()["items"][0]
+    assert after["duration"] == 12.0
+    assert after["transition"] == "fade"
+
+
+# --- bulk delete -----------------------------------------------------------
+def test_bulk_delete_removes_selected(authed, tmp_path):
+    v1 = tmp_path / "a.mp4"
+    v2 = tmp_path / "b.mp4"
+    _make_video(v1)
+    _make_video(v2)
+    ids = []
+    for v in (v1, v2):
+        with v.open("rb") as fh:
+            ids.append(authed.post("/api/media/upload", files={"files": (v.name, fh, "video/mp4")}).json()["items"][0]["id"])
+    r = authed.post("/api/media/bulk-delete", json={"ids": ids})
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] == 2
+    assert authed.get("/api/media").json()["items"] == []
+
+
+def test_bulk_delete_requires_capability(installed):
+    assert installed.post("/api/media/bulk-delete", json={"ids": [1]}).status_code == 401
+
+
+# --- search ----------------------------------------------------------------
+def test_search_scenes_and_playlists(authed):
+    authed.post("/api/scenes", json={"name": "Météo matin", "layers": []})
+    authed.post("/api/scenes", json={"name": "Journal", "layers": []})
+    authed.post("/api/playlists", json={"name": "Nuit"})
+    authed.post("/api/playlists", json={"name": "Journée"})
+    scenes = authed.get("/api/scenes?q=météo").json()["items"]
+    assert [s["name"] for s in scenes] == ["Météo matin"]
+    playlists = authed.get("/api/playlists?q=jour").json()["items"]
+    assert [p["name"] for p in playlists] == ["Journée"]
+
+
+# --- stats -----------------------------------------------------------------
+def test_stats_endpoint(authed):
+    authed.post("/api/scenes", json={"name": "S", "layers": []})
+    data = authed.get("/api/system/stats").json()
+    assert data["scenes"] == 1
+    assert data["media"]["count"] == 0
+    assert data["users"] >= 1
+
+
+# --- config export / import ------------------------------------------------
+def test_config_export_import_round_trip(authed):
+    authed.post("/api/scenes", json={"name": "Décor", "layers": [{"type": "text", "text": "Hi"}]})
+    pid = authed.post("/api/playlists", json={"name": "Boucle"}).json()["id"]
+    sid = authed.get("/api/scenes").json()["items"][0]["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid, "duration": 8})
+    snapshot = authed.get("/api/system/config/export").json()
+    assert snapshot["format"] == 1
+    assert len(snapshot["scenes"]) == 1
+
+    # Import into the same install (additive) and check the content grows.
+    res = authed.post("/api/system/config/import", json={"data": snapshot}).json()
+    assert res["ok"] is True
+    assert res["counts"]["scenes"] == 1
+    assert len(authed.get("/api/scenes").json()["items"]) == 2
+    assert len(authed.get("/api/playlists").json()["items"]) == 2
+
+
+def test_config_import_rejects_bad_file(authed):
+    assert authed.post("/api/system/config/import", json={"data": {"nope": 1}}).status_code == 422
+
+
+def test_config_requires_settings_capability(installed):
+    assert installed.get("/api/system/config/export").status_code == 401

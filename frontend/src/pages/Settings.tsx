@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type BroadcastSettings } from '../api'
 import { useAuth } from '../auth'
 import { Loading, Modal, Spinner, useToast } from '../components/ui'
@@ -49,6 +49,45 @@ export default function Settings() {
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'updating' | 'done'>('idle')
   const [updateMsg, setUpdateMsg] = useState('')
   const [updateCheck, setUpdateCheck] = useState<{ current: string; latest: string | null; update_available: boolean; repo: string; branch: string } | null>(null)
+  const [configBusy, setConfigBusy] = useState(false)
+  const configInput = useRef<HTMLInputElement>(null)
+
+  // Export the configuration as a downloadable JSON file.
+  const exportConfig = async () => {
+    setConfigBusy(true)
+    try {
+      const data = await api.get<Record<string, unknown>>('/api/system/config/export')
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `locallive-config-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      push({ kind: 'ok', title: 'Configuration exportée' })
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Export impossible', message: err?.message })
+    } finally {
+      setConfigBusy(false)
+    }
+  }
+
+  const importConfig = async (file: File) => {
+    setConfigBusy(true)
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text)
+      const res = await api.post<{ counts: Record<string, number> }>('/api/system/config/import', { data })
+      const total = Object.values(res.counts).reduce((a, b) => a + b, 0)
+      push({ kind: 'ok', title: 'Configuration importée', message: `${total} élément(s) ajouté(s).` })
+      await load()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Import impossible', message: err?.message })
+    } finally {
+      setConfigBusy(false)
+      if (configInput.current) configInput.current.value = ''
+    }
+  }
 
   const checkUpdate = useCallback(async () => {
     try {
@@ -299,6 +338,32 @@ export default function Settings() {
             <button className="btn" onClick={changePassword}>
               Modifier le mot de passe
             </button>
+          </div>
+
+          <div className="card mb-16">
+            <div className="card-head">
+              <span className="card-title">Sauvegarde de la configuration</span>
+            </div>
+            <p className="text-sm muted mb-8">
+              Exporte scènes, playlists, flux, programmes et réglages dans un fichier
+              JSON. Les médias ne sont pas inclus (trop volumineux). L'import ajoute
+              le contenu au serveur.
+            </p>
+            <div className="flex gap-8">
+              <button className="btn" onClick={() => void exportConfig()} disabled={configBusy}>
+                Exporter (.json)
+              </button>
+              <button className="btn" onClick={() => configInput.current?.click()} disabled={configBusy}>
+                Importer un fichier
+              </button>
+              <input
+                ref={configInput}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => e.target.files?.[0] && void importConfig(e.target.files[0])}
+              />
+            </div>
           </div>
 
           <div className="card danger-zone">

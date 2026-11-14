@@ -36,6 +36,9 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Aperçu vidéo en direct du programme en cours.
 - Élément en cours, élément suivant, progression de la playlist.
 - Commandes de diffusion : démarrer, arrêter, relancer.
+- **Mise à l'antenne rapide** : un clic sur une scène la met en direct.
+- **Statistiques de contenu** : médias (taille, durée cumulée), scènes, playlists,
+  flux (dont actifs), programmes, utilisateurs.
 - Surveillance **CPU, RAM, stockage** et état de la connexion RTMP.
 - Journal du moteur FFmpeg en temps réel.
 
@@ -50,6 +53,8 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Analyse automatique par **FFprobe** : durée, résolution, codecs, débit.
 - **Vignettes** générées automatiquement, aperçu intégré.
 - Recherche, filtres par type, **dossiers** et catégories.
+- **Tri** (plus récents, nom, taille, durée) et **sélection multiple** pour
+  supprimer plusieurs médias d'un coup.
 - Renommage, suppression, métadonnées détaillées.
 - Affichage de l'espace utilisé et de l'espace disque libre.
 
@@ -129,6 +134,8 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - **Bouton de mise à jour** : vérifie la dernière version publiée et l'applique
   en un clic. Le dépôt et la branche sont détectés à l'installation (dépôt cloné)
   et **jamais demandés** à l'opérateur.
+- **Sauvegarde / restauration** : export et import d'un fichier **JSON** (scènes,
+  playlists, flux, programmes, dossiers, réglages — sans les médias).
 - **Réinitialisation complète** avec **triple confirmation** (résumé, avertissement,
   saisie de « RESET ») : efface tout le contenu en conservant les comptes.
 

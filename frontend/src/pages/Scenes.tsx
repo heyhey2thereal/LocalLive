@@ -4,7 +4,7 @@ import SceneCanvas from '../components/SceneCanvas'
 import { SceneThumb } from '../components/ProgramPreview'
 import AddLayerMenu from '../components/AddLayerMenu'
 import { ConfirmDialog, EmptyState, Loading, Modal, useToast } from '../components/ui'
-import { IconDuplicate, IconLayers, IconPlus, IconRotate, IconTrash, IconZDown, IconZUp } from '../components/icons'
+import { IconDuplicate, IconLayers, IconPlus, IconRotate, IconSearch, IconTrash, IconZDown, IconZUp } from '../components/icons'
 
 // The editor canvas scales to the available space so the whole window fits
 // without scrolling. The scene keeps its own aspect ratio.
@@ -65,6 +65,7 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
 export default function Scenes() {
   const { push } = useToast()
   const [scenes, setScenes] = useState<Scene[]>([])
+  const [sceneQuery, setSceneQuery] = useState('')
   const [media, setMedia] = useState<Media[]>([])
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [loading, setLoading] = useState(true)
@@ -252,24 +253,47 @@ export default function Scenes() {
   const codeExamples = catalog?.code_examples ?? []
   const layerHelp = layer ? layerTypes.find((t) => t.id === layer.type)?.help : undefined
 
+  // Client-side filter so the search box reacts instantly.
+  const visibleScenes = sceneQuery.trim()
+    ? scenes.filter((s) => s.name.toLowerCase().includes(sceneQuery.trim().toLowerCase()))
+    : scenes
+
   return (
     <>
       <div className="page-head">
-        <span className="muted">{scenes.length} scène(s)</span>
+        <div className="flex gap-8 items-center">
+          <span className="muted">{scenes.length} scène(s)</span>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 12, top: 10, color: 'var(--text-3)' }}>
+              <IconSearch size={16} />
+            </span>
+            <input
+              className="input"
+              style={{ paddingLeft: 36, width: 240 }}
+              placeholder="Rechercher une scène…"
+              value={sceneQuery}
+              onChange={(e) => setSceneQuery(e.target.value)}
+            />
+          </div>
+        </div>
         <button className="btn btn-primary" onClick={newScene}>
           <IconPlus size={16} /> Nouvelle scène
         </button>
       </div>
 
-      {scenes.length === 0 ? (
+      {visibleScenes.length === 0 ? (
         <EmptyState
           icon={<IconLayers size={40} />}
-          title="Aucune scène"
-          hint="Composez des habillages avec vidéos, images, textes, logos, visuels réactifs et code FFmpeg."
+          title={sceneQuery ? 'Aucune scène trouvée' : 'Aucune scène'}
+          hint={
+            sceneQuery
+              ? 'Aucune scène ne correspond à cette recherche.'
+              : 'Composez des habillages avec vidéos, images, textes, logos, visuels réactifs et code FFmpeg.'
+          }
         />
       ) : (
         <div className="media-grid">
-          {scenes.map((s) => (
+          {visibleScenes.map((s) => (
             <div key={s.id} className="media-card" onClick={() => openScene(s)}>
               <div className="media-thumb" style={{ background: s.background, aspectRatio: `${s.width}/${s.height}` }}>
                 <SceneThumb scene={s} media={media} />

@@ -64,7 +64,7 @@ def reset(payload: ResetPayload, user: dict = Depends(require(permissions.CAP_US
 
     removed_files = 0
     if not payload.keep_media_files:
-        for directory in (config.MEDIA_DIR, config.THUMBS_DIR, config.TMP_DIR):
+        for directory in (config.MEDIA_DIR, config.THUMBS_DIR, config.PREVIEWS_DIR, config.TMP_DIR):
             if directory.exists():
                 for child in directory.iterdir():
                     try:

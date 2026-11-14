@@ -9,13 +9,14 @@ import {
   Modal,
   useToast,
 } from '../components/ui'
-import { IconDuplicate, IconGrip, IconMusic, IconPlay, IconPlaylist, IconPlus, IconTransition, IconTrash } from '../components/icons'
+import { IconDuplicate, IconGrip, IconMusic, IconPlay, IconPlaylist, IconPlus, IconSearch, IconTransition, IconTrash } from '../components/icons'
 import { SceneThumb } from '../components/ProgramPreview'
 
 export default function Playlists() {
   const { push } = useToast()
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -206,10 +207,28 @@ export default function Playlists() {
 
   if (loading) return <Loading />
 
+  const visiblePlaylists = query.trim()
+    ? playlists.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : playlists
+
   return (
     <>
       <div className="page-head">
-        <span className="muted">{playlists.length} playlist(s)</span>
+        <div className="flex gap-8 items-center">
+          <span className="muted">{playlists.length} playlist(s)</span>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 12, top: 10, color: 'var(--text-3)' }}>
+              <IconSearch size={16} />
+            </span>
+            <input
+              className="input"
+              style={{ paddingLeft: 36, width: 240 }}
+              placeholder="Rechercher une playlist…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
         <button className="btn btn-primary" onClick={() => setCreating(true)}>
           <IconPlus size={16} /> Nouvelle playlist
         </button>
@@ -217,8 +236,8 @@ export default function Playlists() {
 
       <div className="grid" style={{ gridTemplateColumns: '300px 1fr', alignItems: 'start' }}>
         <div className="card" style={{ padding: 10 }}>
-          {playlists.length === 0 && <EmptyState title="Aucune playlist" />}
-          {playlists.map((p) => (
+          {visiblePlaylists.length === 0 && <EmptyState title="Aucune playlist" />}
+          {visiblePlaylists.map((p) => (
             <div
               key={p.id}
               className={`nav-item ${p.id === selectedId ? 'active' : ''}`}

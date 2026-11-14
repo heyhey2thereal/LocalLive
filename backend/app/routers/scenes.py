@@ -133,9 +133,12 @@ def _scene_dict(row) -> dict[str, Any]:
 
 
 @router.get("")
-def list_scenes(user: dict = Depends(current_user)) -> dict[str, Any]:
+def list_scenes(q: str | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_installed()
-    rows = db.query("SELECT * FROM scenes ORDER BY name")
+    if q:
+        rows = db.query("SELECT * FROM scenes WHERE name LIKE ? ORDER BY name", (f"%{q}%",))
+    else:
+        rows = db.query("SELECT * FROM scenes ORDER BY name")
     return {"items": [_scene_dict(r) for r in rows]}
 
 

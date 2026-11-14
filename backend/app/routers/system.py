@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 import shlex
 import subprocess
@@ -135,6 +136,46 @@ def metrics(user: dict = Depends(current_user)) -> dict[str, Any]:
     return snap
 
 
+@router.get("/stats")
+def stats(user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Content counters and library totals for the dashboard.
+
+    Cheap aggregate queries only (COUNT/SUM), so this can be polled alongside
+    the rest of the dashboard without stressing the host.
+    """
+    def _count(table: str) -> int:
+        row = db.query_one(f"SELECT COUNT(*) AS n FROM {table}")
+        return int(row["n"]) if row else 0
+
+    media = db.query_one(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes, COALESCE(SUM(duration), 0) AS secs FROM media"
+    )
+    by_kind = {
+        r["kind"]: r["n"]
+        for r in db.query("SELECT kind, COUNT(*) AS n FROM media GROUP BY kind")
+    }
+    playlist_total = db.query_one("SELECT COALESCE(SUM(duration), 0) AS secs FROM playlist_items")
+    return {
+        "media": {
+            "count": int(media["n"]) if media else 0,
+            "bytes": int(media["bytes"]) if media else 0,
+            "seconds": round(float(media["secs"] or 0), 1),
+            "by_kind": by_kind,
+        },
+        "scenes": _count("scenes"),
+        "playlists": _count("playlists"),
+        "playlist_items": _count("playlist_items"),
+        "streams": _count("streams"),
+        "enabled_streams": int(
+            (db.query_one("SELECT COUNT(*) AS n FROM streams WHERE enabled = 1") or {"n": 0})["n"]
+        ),
+        "schedules": _count("schedules"),
+        "folders": _count("folders"),
+        "users": _count("users"),
+        "playlist_seconds": round(float(playlist_total["secs"] or 0), 1) if playlist_total else 0.0,
+    }
+
+
 @router.get("/logs")
 def logs(lines: int = 100, user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str, Any]:
     lines = max(1, min(lines, 500))
@@ -147,3 +188,176 @@ def logs(lines: int = 100, user: dict = Depends(require(permissions.CAP_SETTINGS
         return {"lines": [ln.rstrip("\n") for ln in content[-lines:]]}
     except OSError:
         return {"lines": []}
+
+
+# ---------------------------------------------------------------------------
+# Configuration export / import
+# ---------------------------------------------------------------------------
+# Content that is safe to move between installs: scenes, playlists (with their
+# items), output streams, schedules, folders and the tunable settings. Media
+# files are NOT included (they can be gigabytes); the import maps items by
+# media *title* where possible and drops the rest, so a playlist still arrives
+# even on a fresh install.
+_CONFIG_TABLES = {
+    "folders": ("id", "name"),
+    "scenes": ("id", "name", "width", "height", "background", "layers"),
+    "playlists": ("id", "name", "description", "loop"),
+    "streams": (
+        "id", "name", "description", "tags", "privacy", "category", "encoding",
+        "kind", "rtmp_url", "stream_key", "output_file", "width", "height", "fps",
+        "bitrate", "audio_bitrate", "enabled",
+    ),
+    "schedules": ("id", "name", "playlist_id", "days", "start_time", "end_time", "enabled"),
+}
+# Settings worth carrying over (never secrets, never the update source).
+_CONFIG_SETTINGS = (
+    "channel_name", "timezone", "language", "image_duration",
+    "stream_width", "stream_height", "stream_fps", "stream_bitrate",
+    "stream_audio_bitrate", "stream_preset", "output_kind", "fallback_playlist_id",
+)
+_CONFIG_FORMAT = 1
+
+
+@router.get("/config/export")
+def export_config(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str, Any]:
+    """Return a portable JSON snapshot of the configuration."""
+    data: dict[str, Any] = {"format": _CONFIG_FORMAT, "version": __version__}
+    for table, columns in _CONFIG_TABLES.items():
+        rows = db.query(f"SELECT {', '.join(columns)} FROM {table} ORDER BY id")
+        data[table] = [dict(r) for r in rows]
+    # Playlist items reference playlists by id; export them too so playlists
+    # survive a round-trip with their ordering, transitions and music.
+    data["playlist_items"] = [
+        dict(r)
+        for r in db.query(
+            "SELECT id, playlist_id, media_id, scene_id, position, duration, transition, "
+            "transition_duration, background_audio_id, background_volume FROM playlist_items ORDER BY playlist_id, position"
+        )
+    ]
+    data["settings"] = {k: db.get_setting(k) for k in _CONFIG_SETTINGS if db.get_setting(k) is not None}
+    return data
+
+
+class ImportPayload(BaseModel):
+    data: dict[str, Any]
+    replace: bool = False
+
+
+@router.post("/config/import")
+def import_config(payload: ImportPayload, user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str, Any]:
+    """Import a snapshot produced by /config/export.
+
+    `replace` clears the existing content tables first. Without it the import is
+    additive: scenes/folders/playlists/streams/schedules are appended with fresh
+    ids, so an existing install is never silently overwritten.
+    """
+    data = payload.data or {}
+    if not isinstance(data, dict) or "format" not in data:
+        raise HTTPException(status_code=422, detail="Fichier de configuration invalide")
+
+    counts: dict[str, int] = {}
+    with db.connection() as conn:
+        if payload.replace:
+            for table in ("playlist_items", "schedules", "streams", "playlists", "scenes", "folders"):
+                conn.execute(f"DELETE FROM {table}")
+
+        # --- folders ---
+        folder_map: dict[int, int] = {}
+        for row in data.get("folders", []) or []:
+            new_id = conn.execute("INSERT INTO folders(name) VALUES(?)", (row.get("name") or "Dossier",)).lastrowid
+            folder_map[int(row.get("id", 0))] = new_id
+        counts["folders"] = len(folder_map)
+
+        # --- scenes ---
+        scene_map: dict[int, int] = {}
+        for row in data.get("scenes", []) or []:
+            new_id = conn.execute(
+                "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+                (
+                    row.get("name") or "Scène",
+                    int(row.get("width") or 1920),
+                    int(row.get("height") or 1080),
+                    row.get("background") or "#000000",
+                    row.get("layers") or "[]",
+                ),
+            ).lastrowid
+            scene_map[int(row.get("id", 0))] = new_id
+        counts["scenes"] = len(scene_map)
+
+        # --- playlists (+ items) ---
+        playlist_map: dict[int, int] = {}
+        for row in data.get("playlists", []) or []:
+            new_id = conn.execute(
+                "INSERT INTO playlists(name, description, loop) VALUES(?,?,?)",
+                (row.get("name") or "Playlist", row.get("description"), int(row.get("loop", 1))),
+            ).lastrowid
+            playlist_map[int(row.get("id", 0))] = new_id
+        counts["playlists"] = len(playlist_map)
+        items = 0
+        for row in data.get("playlist_items", []) or []:
+            pid = playlist_map.get(int(row.get("playlist_id", 0)))
+            if not pid:
+                continue
+            sid = scene_map.get(int(row.get("scene_id") or 0))
+            # Media are not exported; keep only the scene link and the overrides.
+            conn.execute(
+                """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
+                                              transition, transition_duration, background_audio_id, background_volume)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    pid, None, sid, int(row.get("position") or 0), float(row.get("duration") or 0),
+                    row.get("transition") or "cut", float(row.get("transition_duration") or 0),
+                    None, float(row.get("background_volume") or 0.15),
+                ),
+            )
+            items += 1
+        counts["playlist_items"] = items
+
+        # --- streams ---
+        streams = 0
+        for row in data.get("streams", []) or []:
+            conn.execute(
+                """INSERT INTO streams(name, description, tags, privacy, category, encoding, kind,
+                                       rtmp_url, stream_key, output_file, width, height, fps, bitrate,
+                                       audio_bitrate, enabled)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    row.get("name") or "Flux", row.get("description"), row.get("tags") or "[]",
+                    row.get("privacy") or "public", row.get("category"), row.get("encoding") or "veryfast",
+                    row.get("kind") or "rtmp", row.get("rtmp_url"), row.get("stream_key"),
+                    row.get("output_file"), int(row.get("width") or 1280), int(row.get("height") or 720),
+                    int(row.get("fps") or 25), int(row.get("bitrate") or 2500),
+                    int(row.get("audio_bitrate") or 128), int(row.get("enabled", 1)),
+                ),
+            )
+            streams += 1
+        counts["streams"] = streams
+
+        # --- schedules (remap the playlist pointer) ---
+        schedules = 0
+        for row in data.get("schedules", []) or []:
+            pid = playlist_map.get(int(row.get("playlist_id") or 0))
+            conn.execute(
+                "INSERT INTO schedules(name, playlist_id, days, start_time, end_time, enabled) VALUES(?,?,?,?,?,?)",
+                (
+                    row.get("name") or "Programme", pid, row.get("days") or "[]",
+                    row.get("start_time") or "00:00", row.get("end_time") or "00:00",
+                    int(row.get("enabled", 1)),
+                ),
+            )
+            schedules += 1
+        counts["schedules"] = schedules
+
+        # --- settings ---
+        settings = 0
+        for key, value in (data.get("settings") or {}).items():
+            if key in _CONFIG_SETTINGS and value is not None:
+                conn.execute(
+                    "INSERT INTO settings(key, value) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, str(value)),
+                )
+                settings += 1
+        counts["settings"] = settings
+
+    return {"ok": True, "counts": counts, "replaced": payload.replace}

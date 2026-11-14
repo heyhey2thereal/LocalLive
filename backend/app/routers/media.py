@@ -192,6 +192,30 @@ class MediaUpdate(BaseModel):
     duration: float | None = Field(default=None, ge=0)
 
 
+class BulkDeletePayload(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+@router.post("/bulk-delete")
+def bulk_delete(payload: BulkDeletePayload, user: dict = Depends(require(permissions.CAP_MEDIA))) -> dict[str, Any]:
+    """Delete several media at once (files, thumbnails, cached previews, rows)."""
+    deleted = 0
+    for media_id in dict.fromkeys(payload.ids):  # de-duplicate, keep order
+        row = db.query_one("SELECT * FROM media WHERE id = ?", (media_id,))
+        if not row:
+            continue
+        db.execute("DELETE FROM media WHERE id = ?", (media_id,))
+        try:
+            Path(row["path"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+        if row["thumbnail"]:
+            (config.THUMBS_DIR / row["thumbnail"]).unlink(missing_ok=True)
+        _remove_previews(media_id)
+        deleted += 1
+    return {"ok": True, "deleted": deleted}
+
+
 @router.patch("/{media_id}")
 def update_media(
     media_id: int, payload: MediaUpdate, user: dict = Depends(require(permissions.CAP_MEDIA))
@@ -234,7 +258,21 @@ def delete_media(media_id: int, user: dict = Depends(require(permissions.CAP_MED
         pass
     if row["thumbnail"]:
         (config.THUMBS_DIR / row["thumbnail"]).unlink(missing_ok=True)
+    _remove_previews(media_id)
     return {"ok": True}
+
+
+def _remove_previews(media_id: int) -> None:
+    """Delete every cached preview of a media ({id}-<width>.jpg).
+
+    Previews are written lazily per requested width, so a media can leave several
+    behind; without this cleanup they accumulate forever after a delete.
+    """
+    try:
+        for cached in config.PREVIEWS_DIR.glob(f"{media_id}-*.jpg"):
+            cached.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @router.get("/{media_id}/thumbnail")

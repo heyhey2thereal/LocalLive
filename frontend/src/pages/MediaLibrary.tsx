@@ -28,6 +28,8 @@ export default function MediaLibrary() {
   const [uploads, setUploads] = useState<UploadJob[]>([])
   const [preview, setPreview] = useState<Media | null>(null)
   const [toDelete, setToDelete] = useState<Media | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
   const [renaming, setRenaming] = useState<Media | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [storage, setStorage] = useState<{ media_bytes: number; disk: { free: number; total: number } } | null>(null)
@@ -106,6 +108,30 @@ export default function MediaLibrary() {
       await api.del(`/api/media/${toDelete.id}`)
       push({ kind: 'ok', title: 'Média supprimé' })
       setToDelete(null)
+      setPreview(null)
+      await load()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Suppression impossible', message: err?.message })
+    }
+  }
+
+  const toggleSelected = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const bulkDelete = async () => {
+    const ids = Array.from(selected)
+    if (!ids.length) return
+    try {
+      const res = await api.post<{ deleted: number }>('/api/media/bulk-delete', { ids })
+      push({ kind: 'ok', title: `${res.deleted} média(s) supprimé(s)` })
+      setSelected(new Set())
+      setBulkConfirm(false)
       setPreview(null)
       await load()
     } catch (err: any) {
@@ -266,6 +292,20 @@ export default function MediaLibrary() {
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span>{selected.size} média(s) sélectionné(s)</span>
+          <div className="flex gap-8">
+            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>
+              Tout désélectionner
+            </button>
+            <button className="btn btn-sm btn-danger" onClick={() => setBulkConfirm(true)}>
+              <IconTrash size={14} /> Supprimer
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <Loading />
       ) : items.length === 0 ? (
@@ -273,7 +313,19 @@ export default function MediaLibrary() {
       ) : (
         <div className="media-grid">
           {sortedItems.map((m) => (
-            <div key={m.id} className="media-card" onClick={() => setPreview(m)}>
+            <div key={m.id} className={`media-card ${selected.has(m.id) ? 'selected' : ''}`} onClick={() => setPreview(m)}>
+              <button
+                type="button"
+                className={`card-select ${selected.has(m.id) ? 'on' : ''}`}
+                title={selected.has(m.id) ? 'Désélectionner' : 'Sélectionner'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  toggleSelected(m.id)
+                }}
+              >
+                {selected.has(m.id) ? '✓' : ''}
+              </button>
               <div className="media-thumb">
                 {m.thumbnail_url ? (
                   <img src={m.thumbnail_url} alt={m.title} loading="lazy" />
@@ -390,6 +442,16 @@ export default function MediaLibrary() {
           message={`« ${toDelete.title} » sera définitivement supprimé du disque et des playlists.`}
           onConfirm={doDelete}
           onCancel={() => setToDelete(null)}
+        />
+      )}
+
+      {bulkConfirm && (
+        <ConfirmDialog
+          title="Supprimer les médias sélectionnés"
+          message={`${selected.size} média(s) seront définitivement supprimés du disque et des playlists.`}
+          confirmLabel="Tout supprimer"
+          onConfirm={bulkDelete}
+          onCancel={() => setBulkConfirm(false)}
         />
       )}
     </>

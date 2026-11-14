@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type BroadcastStatus, type Media, type Scene } from '../api'
+import { api, type BroadcastStatus, type ContentStats, type Media, type Scene } from '../api'
 import { usePoll } from '../lib/usePoll'
 import { useToast } from '../components/ui'
 import { SceneThumb } from '../components/ProgramPreview'
@@ -29,14 +29,17 @@ export default function Dashboard() {
   // send it straight to air. Saves the operator a trip through Playlists.
   const [scenes, setScenes] = useState<Scene[]>([])
   const [media, setMedia] = useState<Media[]>([])
+  const [stats, setStats] = useState<ContentStats | null>(null)
 
   useEffect(() => {
     Promise.all([
       api.get<{ items: Scene[] }>('/api/scenes').catch(() => ({ items: [] })),
       api.get<{ items: Media[] }>('/api/media').catch(() => ({ items: [] })),
-    ]).then(([s, m]) => {
+      api.get<ContentStats>('/api/system/stats').catch(() => null),
+    ]).then(([s, m, st]) => {
       setScenes(s.items)
       setMedia(m.items)
+      setStats(st)
     })
   }, [])
 
@@ -330,6 +333,23 @@ export default function Dashboard() {
         </div>
       )}
 
+      {stats && (
+        <div className="card mt-24">
+          <div className="card-head">
+            <span className="card-title">Contenu</span>
+            <span className="text-sm muted-2">{stats.media.count} média(s)</span>
+          </div>
+          <div className="stat-chips">
+            <StatChip label="Médias" value={String(stats.media.count)} sub={`${formatBytes(stats.media.bytes)} · ${formatDuration(stats.media.seconds)}`} />
+            <StatChip label="Scènes" value={String(stats.scenes)} />
+            <StatChip label="Playlists" value={String(stats.playlists)} sub={`${stats.playlist_items} élément(s)`} />
+            <StatChip label="Flux de sortie" value={String(stats.streams)} sub={`${stats.enabled_streams} actif(s)`} />
+            <StatChip label="Programmes" value={String(stats.schedules)} />
+            <StatChip label="Utilisateurs" value={String(stats.users)} />
+          </div>
+        </div>
+      )}
+
       {engine.log_tail.length > 0 && (
         <div className="card mt-24">
           <div className="card-head">
@@ -351,6 +371,16 @@ export default function Dashboard() {
         </div>
       )}
     </>
+  )
+}
+
+function StatChip({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="stat-chip">
+      <div className="stat-chip-value">{value}</div>
+      <div className="stat-chip-label">{label}</div>
+      {sub ? <div className="stat-chip-sub">{sub}</div> : null}
+    </div>
   )
 }
 
