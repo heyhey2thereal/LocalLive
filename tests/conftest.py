@@ -19,7 +19,7 @@ os.environ["LOCALLIVE_DATA"] = str(_TMP)
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, db  # noqa: E402
+from app import config, db, monitor  # noqa: E402
 from app.main import create_app  # noqa: E402
 
 
@@ -31,6 +31,9 @@ def client() -> TestClient:
         if p.exists():
             p.unlink()
     db._initialised = False
+    # The media-size cache is process-wide; clear it so each test sees its own
+    # freshly written files.
+    monitor._media_cache = None
     db.init_db()
     with TestClient(create_app()) as c:
         yield c

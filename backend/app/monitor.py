@@ -92,11 +92,26 @@ def disk() -> dict:
     }
 
 
+_media_cache: tuple[float, dict] | None = None
+_MEDIA_CACHE_TTL = 30.0
+
+
 def media_usage() -> dict:
-    return {
+    """Size of the media and thumbnail directories.
+
+    Walking the media tree can be slow on a large library, and the result barely
+    moves between two polls, so it is cached for 30 seconds.
+    """
+    global _media_cache
+    now = time.monotonic()
+    if _media_cache and now - _media_cache[0] < _MEDIA_CACHE_TTL:
+        return _media_cache[1]
+    value = {
         "media": _dir_size(str(config.MEDIA_DIR)),
         "thumbnails": _dir_size(str(config.THUMBS_DIR)),
     }
+    _media_cache = (now, value)
+    return value
 
 
 def uptime_seconds() -> float:
