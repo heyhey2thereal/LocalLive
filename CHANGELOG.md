@@ -3,6 +3,30 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.6.0] — 2026-11-14
+
+### Corrigé
+- **Débordement des images** : chaque calque est toujours dimensionné et borné au
+  cadre ; le rendu de l'aperçu remplit exactement sa fenêtre (`FitScene` mesuré) —
+  la fenêtre programme ne bouge plus.
+- **Suppression de scène** : le bouton de la carte est maintenant toujours
+  cliquable (au-dessus de l'aperçu) et un bouton « Supprimer » est ajouté dans
+  l'éditeur.
+- **Fluidité** : le déplacement/redimensionnement est limité à une mise à jour par
+  image (`requestAnimationFrame`) — plus de saccades.
+- **Countdown** : horloge MM:SS vivante dans l'aperçu (et expression FFmpeg
+  fiabilisée).
+- **Sélection de texte** désactivée partout (sauf champs, code, erreurs) ; les
+  images ne sont plus glissables.
+- **Mise à jour réellement fonctionnelle** : `scripts/locallive-update` +
+  règle sudoers posés par `install.sh` ; l'interface configure le dépôt et la
+  branche, vérifie s'il y a une mise à jour et l'applique.
+
+### Modifié
+- Aperçu / Programme : le bouton « Mettre à l'antenne » est retiré (la flèche
+  suffit) ; la bascule **ne démarre plus** le direct ; des **popups de
+  confirmation** encadrent le démarrage et l'arrêt du direct.
+
 ## [2.5.0] — 2026-11-14
 
 ### Corrigé
