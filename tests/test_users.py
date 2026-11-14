@@ -101,3 +101,32 @@ def test_version_endpoint(authed):
     data = authed.get("/api/system/version").json()
     assert data["version"]
     assert isinstance(data["changelog"], str)
+
+
+def test_reset_preview_and_reset(authed):
+    # Create some content, then reset and confirm it is gone but users remain.
+    pid = authed.post("/api/playlists", json={"name": "Temp"}).json()["id"]
+    authed.post("/api/scenes", json={"name": "S", "layers": []})
+    preview = authed.get("/api/maintenance/reset/preview").json()
+    assert preview["confirm_phrase"] == "RESET"
+    assert preview["tables"]["playlists"] >= 1
+
+    # Wrong confirmation is rejected.
+    assert authed.post("/api/maintenance/reset", json={"confirm": "nope"}).status_code == 422
+
+    r = authed.post("/api/maintenance/reset", json={"confirm": "RESET"})
+    assert r.status_code == 200, r.text
+    assert authed.get("/api/playlists").json()["items"] == []
+    assert authed.get("/api/scenes").json()["items"] == []
+    # Users are preserved and the session still works.
+    assert any(u["username"] == "admin" for u in authed.get("/api/users").json()["items"])
+
+
+def test_reset_requires_admin(installed):
+    assert installed.get("/api/maintenance/reset/preview").status_code == 401
+
+
+def test_update_check_endpoint(authed):
+    data = authed.get("/api/system/update/check").json()
+    assert data["current"]
+    assert "update_available" in data

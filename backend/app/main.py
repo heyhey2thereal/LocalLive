@@ -20,6 +20,7 @@ from .routers import (
     broadcast,
     chat,
     folders,
+    maintenance,
     media,
     meta,
     playlists,
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(chat.router)
     app.include_router(meta.router)
+    app.include_router(maintenance.router)
     app.include_router(system.router)
 
     @app.get("/api/health")
