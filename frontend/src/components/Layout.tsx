@@ -18,14 +18,15 @@ import {
 import { LogoMark } from './Logo'
 import { t } from '../i18n'
 
+// Order: broadcast first (what goes on air), then content, then configuration.
 const NAV = [
   { to: '/', label: 'nav.dashboard', icon: IconDashboard, end: true },
   { to: '/preview', label: 'nav.preview', icon: IconSignal },
+  { to: '/schedule', label: 'nav.schedule', icon: IconCalendar },
   { to: '/streams', label: 'nav.streams', icon: IconStreams },
   { to: '/media', label: 'nav.media', icon: IconMedia },
   { to: '/playlists', label: 'nav.playlists', icon: IconPlaylist },
   { to: '/scenes', label: 'nav.scenes', icon: IconLayers },
-  { to: '/schedule', label: 'nav.schedule', icon: IconCalendar },
   { to: '/users', label: 'nav.users', icon: IconUsers, adminOnly: true },
   { to: '/settings', label: 'nav.settings', icon: IconSettings },
 ]

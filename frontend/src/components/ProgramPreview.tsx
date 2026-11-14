@@ -77,7 +77,19 @@ export function SceneThumb({ scene, media }: { scene: Scene; media: Media[] }) {
   return <SceneRender scene={scene} media={media} width={220} />
 }
 
-function MediaRender({ item, width, height, sound }: { item: EngineItem; width: number; height: number; sound: boolean }) {
+function MediaRender({
+  item,
+  width,
+  height,
+  sound,
+  reloadKey,
+}: {
+  item: EngineItem
+  width: number
+  height: number
+  sound: boolean
+  reloadKey?: string | number
+}) {
   const [scene, setScene] = useState<SceneLike | null>(null)
   const [media, setMedia] = useState<Media[]>([])
   const [ready, setReady] = useState(false)
@@ -102,7 +114,9 @@ function MediaRender({ item, width, height, sound }: { item: EngineItem; width: 
     return () => {
       active = false
     }
-  }, [item.scene_id])
+    // reloadKey forces a re-fetch when the source changes, so the monitor
+    // reflects edits without a manual refresh.
+  }, [item.scene_id, item.media_id, reloadKey])
 
   if (item.scene_id) {
     if (!ready || !scene) return <div className="stage-empty">Chargement…</div>
@@ -141,9 +155,10 @@ interface Props {
   width: number
   height: number
   sound?: boolean
+  reloadKey?: string | number
 }
 
-export default function ProgramPreview({ item, emptyLabel, width, height, sound = false }: Props) {
+export default function ProgramPreview({ item, emptyLabel, width, height, sound = false, reloadKey }: Props) {
   if (!item) {
     return (
       <div className="program-tile">
@@ -155,7 +170,7 @@ export default function ProgramPreview({ item, emptyLabel, width, height, sound 
   }
   return (
     <div className="program-tile">
-      <MediaRender item={item} width={width} height={height} sound={sound} />
+      <MediaRender item={item} width={width} height={height} sound={sound} reloadKey={reloadKey} />
     </div>
   )
 }

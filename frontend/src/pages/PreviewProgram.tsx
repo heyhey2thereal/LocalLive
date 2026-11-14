@@ -5,15 +5,17 @@
 // switches the live playlist. Each monitor has a pop-out button that opens the
 // render in a separate browser window.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } from '../api'
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
 import { EmptyState, formatDuration, Loading, useToast } from '../components/ui'
-import { IconPlay, IconStreams, IconZap } from '../components/icons'
+import { IconLayers, IconMedia, IconPlay, IconPlaylist, IconStreams, IconZap } from '../components/icons'
 
 export default function PreviewProgram() {
   const { push } = useToast()
+  const navigate = useNavigate()
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selectedId, setSelectedId] = useState<number | ''>('')
   const [transition, setTransition] = useState('fade')
@@ -51,6 +53,19 @@ export default function PreviewProgram() {
   const preview = poll.data?.preview
   const outputs = poll.data?.outputs ?? []
 
+  // Refresh the monitor content periodically (and on playlist changes) so edits
+  // to the scene/playlist show up without a manual refresh. A slow tick avoids
+  // remounting the render on every poll while still catching source changes.
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((v) => v + 1), 3000)
+    return () => window.clearInterval(t)
+  }, [])
+  const reloadKey = useMemo(
+    () => `${program?.playlist_id ?? ''}-${preview?.playlist_id ?? ''}-${tick}`,
+    [program?.playlist_id, preview?.playlist_id, tick],
+  )
+
   // Which program item is shown on the monitor (default: the live one).
   const programItem: EngineItem | null =
     program?.running && program.items.length > 0
@@ -83,6 +98,39 @@ export default function PreviewProgram() {
 
   return (
     <>
+      {/* Quick actions: everything to manage the sources lives here. */}
+      <div className="switcher-toolbar">
+        <button className="btn btn-sm" onClick={() => navigate('/playlists')}>
+          <IconPlaylist size={15} /> Gérer les playlists
+        </button>
+        <button className="btn btn-sm" onClick={() => navigate('/scenes')}>
+          <IconLayers size={15} /> Gérer les scènes
+        </button>
+        <button className="btn btn-sm" onClick={() => navigate('/media')}>
+          <IconMedia size={15} /> Médiathèque
+        </button>
+        <div className="grow" />
+        {program?.running ? (
+          <button
+            className="btn btn-sm btn-danger"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                await api.post('/api/broadcast/stop')
+                poll.refresh()
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            Arrêter la diffusion
+          </button>
+        ) : (
+          <span className="text-sm muted-2">Diffusion à l'arrêt</span>
+        )}
+      </div>
+
       <div className="switcher">
         {/* PROGRAM */}
         <div className="switcher-monitor">
@@ -97,7 +145,7 @@ export default function PreviewProgram() {
               </button>
             </div>
           </div>
-          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} height={293} />
+          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} height={293} reloadKey={reloadKey} />
           <div className="switcher-foot">
             <div className="flex gap-8 items-center">
               {program?.running && program.items.length > 1 && (
@@ -145,6 +193,7 @@ export default function PreviewProgram() {
             emptyLabel="Aucune playlist sélectionnée"
             width={520}
             height={293}
+            reloadKey={reloadKey}
           />
           <div className="switcher-foot">
             <span className="text-sm muted-2">

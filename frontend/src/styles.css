@@ -378,6 +378,9 @@ textarea {
 .stage-empty { color: var(--text-3); display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
 /* Switcher (Preview / Program) */
+.switcher-toolbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;
+}
 .switcher { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 900px) { .switcher { grid-template-columns: 1fr; } }
 .switcher-monitor {
