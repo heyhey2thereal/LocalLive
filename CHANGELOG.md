@@ -3,6 +3,28 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.7.0] — 2026-11-14
+
+### Corrigé
+- **Étirement d'image** : une image redimensionnée remplit désormais toute sa
+  boîte (étirement), à l'écran comme à l'antenne : tirer un bord étire l'image
+  de ce côté, plus de bandes noires.
+- **Image hors cadre inutilisable** : le redimensionnement est borné au cadre
+  (le bord tiré reste où on le pose, l'image ne peut plus dépasser), et une
+  scène plus ancienne est recadrée à l'ouverture — les poignées restent toujours
+  atteignables.
+- **Animations de transition** : l'effet joue sur la **fenêtre** du moniteur
+  (voile, balayage, cercle…) et non sur son contenu — la vidéo continue de jouer
+  pendant la bascule.
+
+### Ajouté
+- **Aperçu des animations de calque** : choisir une animation (entrée, boucle,
+  sortie) la montre immédiatement sur le calque dans l'éditeur, et dans les
+  moniteurs **Aperçu** et **Programme**.
+- **Choix du flux de sortie au démarrage** : la fenêtre de confirmation du
+  direct propose la **sortie principale**, un **flux précis** ou **tous les
+  flux activés**.
+
 ## [2.6.1] — 2026-11-14
 
 ### Corrigé

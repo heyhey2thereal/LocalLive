@@ -78,7 +78,7 @@ export default function ProgramWindow() {
         </div>
       )}
       <div className="program-window-stage">
-        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} sound={soundEnabled} />
+        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} sound={soundEnabled} animate />
       </div>
     </div>
   )

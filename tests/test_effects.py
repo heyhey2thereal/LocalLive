@@ -33,6 +33,14 @@ def _make_audio(path: Path, seconds=3, freq=220):
     )
 
 
+def _make_image(path: Path, size="320x240"):
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", f"color=c=blue:size={size}:duration=1", "-frames:v", "1", str(path)],
+        check=True, timeout=60,
+    )
+
+
 def _insert_media(path: Path, kind: str, duration: float) -> int:
     from app import probe
 
@@ -153,6 +161,31 @@ def test_background_music_mixed_with_amix(installed, tmp_path):
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "amix=inputs=2" in fc
     assert "volume=0.200" in fc
+
+
+def test_media_layer_stretches_to_box(installed, tmp_path):
+    # A resized image must fill its box (stretch), so the on-air render matches
+    # the editor where dragging an edge stretches that side of the image.
+    img = tmp_path / "i.png"
+    _make_image(img)
+    mid = _insert_media(img, "image", 5.0)
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('Stretch', 1)")
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        ("Stretch", 320, 240, "#000000",
+         f'[{{"type":"image","media_id":{mid},"x":10,"y":10,"width":120,"height":90,"z":1}}]'),
+    )
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)",
+        (pid, sid, 0, 2.0),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    cmd, _ = engine._build_command(items, OutputConfig(kind="file", file_path=str(tmp_path / "o.ts"), width=320, height=240))
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "scale=120:90" in fc
+    # No letterbox padding: the image fills the whole box.
+    assert "pad=120:90" not in fc
 
 
 def test_reactive_layer_adds_visualizer(installed, tmp_path):

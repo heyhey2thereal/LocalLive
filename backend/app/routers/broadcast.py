@@ -30,6 +30,9 @@ ALLOWED_SETTINGS = {
 
 class StartPayload(BaseModel):
     playlist_id: int | None = None
+    # Which output(s) to feed: "primary" (main output only), "all" (fan-out to
+    # every enabled stream), or a stream id. None keeps the default fan-out.
+    output_id: int | str | None = None
 
 
 class SettingsPayload(BaseModel):
@@ -85,7 +88,7 @@ def start(payload: StartPayload, user: dict = Depends(require(permissions.CAP_BR
         playlist_id = int(fallback) if fallback else None
     if not playlist_id:
         raise HTTPException(status_code=422, detail="Aucune playlist active ou de secours configurée")
-    result = engine.start(int(playlist_id))
+    result = engine.start(int(playlist_id), output_id=payload.output_id)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "Échec du démarrage"))
     return result

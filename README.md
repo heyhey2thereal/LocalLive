@@ -69,14 +69,16 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
   Compte à rebours, Réactif, Logo, Bandeau**.
 - **Animations IN / LOOP / OUT** combinables : fondu, glissements, zoom, pop,
   défilement, clignotement, pulsation, **tremblement**, flottement, rotation,
-  respiration, couleurs.
+  respiration, couleurs. Elles sont **jouées dans l'éditeur** (aperçu en boucle)
+  et dans les moniteurs Aperçu / Programme.
 - **Rotation**, opacité, ordre (z), visibilité, duplication, raccourcis (Ctrl+D,
   Suppr).
 - **Chat box** : derniers messages d'une source, alimentés par
   `POST /api/chat/<source>` (voir l'aide du calque).
 - **URL web** : image distante (png/jpg) récupérée par FFmpeg.
 - La liste des scènes affiche un **mini-rendu** réel ; redimensionner un texte
-  change sa taille ; les images ne débordent jamais du cadre.
+  change sa taille ; tirer un bord **étire l'image** de ce côté (aucune bande
+  noire) et le calque reste toujours **borné au cadre**, donc saisissable.
 
 ### Aperçu / Programme
 - Deux moniteurs **identiques côte à côte** : **Aperçu** (à gauche) et
@@ -84,7 +86,8 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - **Flèche de transition** entre les deux : un clic met l'aperçu à l'antenne et
   fait basculer l'ancien programme dans l'aperçu. Si la diffusion est arrêtée,
   la prise d'antenne **démarre le direct** : aucune étape préalable.
-- Choix de la **transition** (coupe, fondu, balayage…) sous les moniteurs.
+- Choix de la **transition** (coupe, fondu, balayage…) sous les moniteurs ;
+  l'effet joue sur la **fenêtre** du moniteur, pas sur son contenu.
 - **Un seul bouton** pour mettre une playlist à l'antenne ; **contenu de
   l'aperçu** listé en bas (masquable).
 - **Ouverture du rendu dans une fenêtre séparée** (moniteur déporté) avec
@@ -96,6 +99,8 @@ Conçu pour un hôte modeste : **2 cœurs Celeron, 8 Go de RAM, sans GPU**.
 - Par flux : nom, description, **étiquettes**, **confidentialité**, catégorie, encodage,
   résolution, débit, activation.
 - **Test de connexion** RTMP et clé de flux **jamais exposée** (masquée).
+- Au **démarrage du direct**, on choisit la destination : **sortie principale**,
+  un **flux précis**, ou **tous les flux activés**.
 
 ### Programmation
 - Programmes **quotidiens et hebdomadaires** (plages horaires récurrentes).

@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SceneLayer } from '../api'
+import { layerAnimation } from '../lib/animations'
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
@@ -95,6 +96,43 @@ export default function SceneCanvas({
       x: Math.max(0, Math.min(l.x, Math.max(0, width - w))),
       y: Math.max(0, Math.min(l.y, Math.max(0, height - h))),
     }
+  }
+
+  // Clamp a resized box to the frame while keeping the edge the user is dragging
+  // where they put it. Without this, dragging a handle past the frame let the box
+  // grow without bound: it overflowed the canvas and its handles became
+  // unreachable, so the image could no longer be grabbed.
+  const clampResize = (
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    hnd: Handle,
+  ): { x: number; y: number; width: number; height: number } => {
+    w = Math.max(MIN_SIZE, Math.min(w, width))
+    h = Math.max(MIN_SIZE, Math.min(h, height))
+    if (hnd.includes('w')) {
+      // Right edge stays put; pull the left edge back inside the frame.
+      const right = Math.min(x + w, width)
+      x = Math.max(0, Math.min(x, right - MIN_SIZE))
+      w = right - x
+    } else if (hnd.includes('e')) {
+      x = Math.max(0, Math.min(x, width - MIN_SIZE))
+      w = Math.max(MIN_SIZE, Math.min(w, width - x))
+    } else {
+      x = Math.max(0, Math.min(x, Math.max(0, width - w)))
+    }
+    if (hnd.includes('n')) {
+      const bottom = Math.min(y + h, height)
+      y = Math.max(0, Math.min(y, bottom - MIN_SIZE))
+      h = bottom - y
+    } else if (hnd.includes('s')) {
+      y = Math.max(0, Math.min(y, height - MIN_SIZE))
+      h = Math.max(MIN_SIZE, Math.min(h, height - y))
+    } else {
+      y = Math.max(0, Math.min(y, Math.max(0, height - h)))
+    }
+    return { x, y, width: w, height: h }
   }
 
   // Build the list of smart-guide positions (canvas + other layers).
@@ -246,14 +284,15 @@ export default function SceneCanvas({
         h = w / ratio
         if (hnd.includes('n')) y = d.orig.y + (d.baseH - h)
       }
+      const bounded = clampResize(x, y, w, h, hnd)
       const patch: Partial<SceneLayer> = {
-        x: snapGrid(x, shift),
-        y: snapGrid(y, shift),
-        width: snapGrid(w, shift),
-        height: snapGrid(h, shift),
+        x: snapGrid(bounded.x, shift),
+        y: snapGrid(bounded.y, shift),
+        width: snapGrid(bounded.width, shift),
+        height: snapGrid(bounded.height, shift),
       }
       if (d.isText && d.baseH > 0) {
-        patch.font_size = Math.max(MIN_FONT, Math.round((d.baseFont * h) / d.baseH))
+        patch.font_size = Math.max(MIN_FONT, Math.round((d.baseFont * bounded.height) / d.baseH))
       }
       return { patch, guides: { v: [], h: [] } }
     }
@@ -322,6 +361,10 @@ export default function SceneCanvas({
             const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
             lh = Math.round(lw * ratio)
           }
+          // Editor: preview every animation on a loop so the motion is always
+          // visible (IN/OUT are one-shot on air and would leave the layer
+          // hidden once the OUT finished).
+          const anim = layerAnimation(l, 0, width * scale, true)
           return (
             <div
               key={i}
@@ -329,7 +372,7 @@ export default function SceneCanvas({
                 if (el) layerRefs.current.set(i, el)
                 else layerRefs.current.delete(i)
               }}
-              className={`scene-layer ${selected === i ? 'selected' : ''}`}
+              className={`scene-layer ${selected === i ? 'selected' : ''} ${anim ? anim.className : ''}`}
               style={{
                 left: l.x * scale,
                 top: l.y * scale,
@@ -340,20 +383,24 @@ export default function SceneCanvas({
                 fontSize: isText || isChat || isCountdown ? (l.font_size ?? 32) * scale : undefined,
                 background: isText || isChat || isCountdown ? l.background ?? 'transparent' : 'transparent',
                 padding: isText || isChat || isCountdown ? '4px 8px' : 0,
-                transform: l.rotation ? `rotate(${l.rotation}deg)` : undefined,
-                filter: blur ? `blur(${blur * scale}px)` : undefined,
+                // When an animation drives `transform`, it also owns the rotation
+                // (via --ll-rot), so we must not set it inline.
+                transform: !anim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
                 zIndex: (l.z ?? 0) + 1,
+                ...(anim ? anim.style : {}),
               }}
               onMouseDown={(e) => startDrag(e, i, 'move')}
               onClick={(e) => e.stopPropagation()}
             >
-              {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
-              {isMedia && !imgSrc && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{l.type}</span>}
-              {isReactive && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Réactif · {l.visualizer}</span>}
-              {isCode && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Code</span>}
-              {isChat && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Chat</span>}
-              {isCountdown && <span style={{ fontSize: (l.font_size ?? 96) * scale * 0.5 }}>{l.countdown_seconds ?? 60}</span>}
-              {isText && (l.text || 'Texte')}
+              <span className="scene-layer-inner" style={{ filter: blur ? `blur(${blur * scale}px)` : undefined }}>
+                {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
+                {isMedia && !imgSrc && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{l.type}</span>}
+                {isReactive && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Réactif · {l.visualizer}</span>}
+                {isCode && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Code</span>}
+                {isChat && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Chat</span>}
+                {isCountdown && <span style={{ fontSize: (l.font_size ?? 96) * scale * 0.5 }}>{l.countdown_seconds ?? 60}</span>}
+                {isText && (l.text || 'Texte')}
+              </span>
               {selected === i &&
                 HANDLES.map((h) => (
                   <span key={h} className={`scene-handle h-${h}`} onMouseDown={(e) => startDrag(e, i, h)} />

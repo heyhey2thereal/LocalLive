@@ -32,6 +32,8 @@ export default function PreviewProgram() {
   const [busy, setBusy] = useState(false)
   const [txClass, setTxClass] = useState('')
   const [confirm, setConfirm] = useState<'start' | 'stop' | null>(null)
+  // Output chosen in the start dialog: 'primary', 'all' or a stream id.
+  const [startOutput, setStartOutput] = useState<string>('primary')
   const txTimer = useRef<number | null>(null)
 
   // Fast polling so preview/program react quickly (no perceptible delay).
@@ -63,6 +65,7 @@ export default function PreviewProgram() {
 
   const program = poll.data?.program
   const preview = poll.data?.preview
+  const availableOutputs = poll.data?.outputs ?? []
 
   // Periodically refresh the rendered content so scene edits appear live.
   const [tick, setTick] = useState(0)
@@ -115,7 +118,12 @@ export default function PreviewProgram() {
   const startLive = async () => {
     setBusy(true)
     try {
-      await api.post('/api/broadcast/start', target ? { playlist_id: target } : {})
+      const outputId: number | string =
+        startOutput === 'primary' || startOutput === 'all' ? startOutput : Number(startOutput)
+      await api.post('/api/broadcast/start', {
+        ...(target ? { playlist_id: target } : {}),
+        output_id: outputId,
+      })
       push({ kind: 'ok', title: 'Diffusion démarrée' })
       poll.refresh()
     } catch (err: any) {
@@ -144,12 +152,13 @@ export default function PreviewProgram() {
     <div className="switcher-page">
       <div className="switcher-row">
         {/* PREVIEW (left) */}
-        <div className={`switcher-monitor ${txClass}`}>
+        <div className="switcher-monitor">
+          <span className={`switcher-tx ${txClass}`} aria-hidden />
           <div className="switcher-head">
             <span className="badge badge-info">APERÇU</span>
             <span className="text-sm muted-2 truncate">{preview?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={previewItem} emptyLabel="Aucune playlist dans l'aperçu" width={520} reloadKey={reloadKey} />
+          <ProgramPreview item={previewItem} emptyLabel="Aucune playlist dans l'aperçu" width={520} reloadKey={reloadKey} animate />
           <div className="switcher-monitor-foot">
             <select
               className="select grow"
@@ -174,14 +183,15 @@ export default function PreviewProgram() {
         </div>
 
         {/* PROGRAM (right) */}
-        <div className={`switcher-monitor ${txClass}`}>
+        <div className="switcher-monitor">
+          <span className={`switcher-tx ${txClass}`} aria-hidden />
           <div className="switcher-head">
             <span className="badge badge-live">
               <span className="dot dot-live" /> PROGRAMME
             </span>
             <span className="text-sm muted-2 truncate">{program?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} reloadKey={reloadKey} sound />
+          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} reloadKey={reloadKey} sound animate />
           <div className="switcher-monitor-foot">
             <span className="text-sm muted-2">
               {running && program
@@ -269,6 +279,32 @@ export default function PreviewProgram() {
               ? 'Le direct va être mis à l’antenne. Confirmez-vous le démarrage de la diffusion ?'
               : 'La diffusion va être coupée immédiatement. Confirmez-vous l’arrêt du direct ?'}
           </p>
+          {confirm === 'start' ? (
+            <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+              <label>Flux de sortie</label>
+              <select className="select" value={startOutput} onChange={(e) => setStartOutput(e.target.value)}>
+                <option value="primary">
+                  Sortie principale
+                  {availableOutputs[0]?.destination ? ` (${availableOutputs[0].destination})` : ''}
+                </option>
+                {availableOutputs
+                  .filter((o) => o.id !== 'primary')
+                  .map((o) => (
+                    <option key={o.id} value={String(o.id)}>
+                      {o.name}
+                      {o.destination ? ` — ${o.destination}` : ''}
+                    </option>
+                  ))}
+                {availableOutputs.some((o) => o.id !== 'primary') ? (
+                  <option value="all">Tous les flux activés</option>
+                ) : null}
+              </select>
+              <div className="hint">
+                Choisissez la destination diffusée. La sortie principale est le réglage de l’onglet
+                Flux de sortie.
+              </div>
+            </div>
+          ) : null}
         </Modal>
       )}
     </div>

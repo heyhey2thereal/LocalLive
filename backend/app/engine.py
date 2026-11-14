@@ -97,11 +97,20 @@ class PlaybackEngine:
         self._progress_thread: threading.Thread | None = None
         self._config: OutputConfig | None = None
         self._desired: dict[str, Any] | None = None
+        # Which output(s) to feed. None = historical fan-out (primary + enabled
+        # streams); 'primary' = only the main output; int = the matching stream;
+        # 'all' = explicit fan-out.
+        self._output_id: int | str | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-    def start(self, playlist_id: int, config_override: dict[str, Any] | None = None) -> dict[str, Any]:
+    def start(
+        self,
+        playlist_id: int,
+        config_override: dict[str, Any] | None = None,
+        output_id: int | str | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             if self._state.running:
                 return {"ok": False, "error": "Diffusion déjà en cours"}
@@ -116,6 +125,10 @@ class PlaybackEngine:
 
             output = self._build_output_config(config_override or {})
             self._config = output
+            # Which output(s) to feed: None keeps the historical fan-out (primary
+            # + every enabled stream), 'primary' only the main output, an int the
+            # matching stream, 'all' the explicit fan-out.
+            self._output_id = output_id
             self._state = EngineState(
                 running=True,
                 starting=True,
@@ -131,6 +144,7 @@ class PlaybackEngine:
                     "fps": output.fps,
                     "bitrate": output.bitrate,
                     "file_path": output.file_path,
+                    "target_id": output_id,
                 },
                 started_at=time.time(),
                 items=[_public_item(i) for i in items],
@@ -437,10 +451,24 @@ class PlaybackEngine:
         The configured output is always primary. For an RTMP broadcast we append
         every enabled row of the `streams` table, so a single engine process can
         feed several platforms at once.
+
+        `self._output_id` narrows the target: 'primary' keeps only the main
+        output, an int keeps only that stream, None/'all' keep the historical
+        fan-out (primary + every enabled stream).
         """
-        targets: list[tuple[OutputConfig, str]] = [(output, output.destination)]
-        if output.kind == "rtmp":
-            for row in db.query("SELECT * FROM streams WHERE enabled = 1 AND kind = 'rtmp' ORDER BY id"):
+        target = self._output_id
+        targets: list[tuple[OutputConfig, str]] = []
+        if target != "primary" and not isinstance(target, int):
+            # Historical behaviour: the primary output is always used, unless a
+            # specific stream was chosen (int) or the primary alone was requested.
+            targets.append((output, output.destination))
+        if output.kind == "rtmp" and target != "primary":
+            for row in db.query("SELECT * FROM streams WHERE kind = 'rtmp' ORDER BY id"):
+                if isinstance(target, int) and row["id"] != target:
+                    continue
+                if target is None or target == "all":
+                    if not row["enabled"]:
+                        continue
                 key = row["stream_key"] or ""
                 url = (row["rtmp_url"] or "").rstrip("/")
                 dest = f"{url}/{key}" if key else url
@@ -461,6 +489,10 @@ class PlaybackEngine:
                     ),
                     dest,
                 ))
+        # A chosen stream that vanished would leave nothing to feed: fall back to
+        # the primary output so the broadcast still starts.
+        if not targets:
+            targets.append((output, output.destination))
         return targets
 
     def _can_stream_copy(self, items: list[dict[str, Any]]) -> bool:
@@ -848,12 +880,10 @@ class PlaybackEngine:
                 li = add_input(["-t", f"{dur:.3f}", "-i", media["path"]])
             lw = int(layer.get("width") or w)
             lh = int(layer.get("height") or h)
-            # `force_original_aspect_ratio=decrease` keeps the whole image inside
-            # the box (never overflowing the frame); a transparent pad centres it.
-            chain = (
-                f"scale={lw}:{lh}:force_original_aspect_ratio=decrease,"
-                f"pad={lw}:{lh}:(ow-iw)/2:(oh-ih)/2:color=#00000000"
-            )
+            # The editor lets the operator drag a layer's edges freely, so the
+            # image must fill the box it was given (stretch), not letterbox
+            # inside it: a stretched image looks exactly like the editor.
+            chain = f"scale={lw}:{lh}"
             blur = float(layer.get("blur") or 0)
             if blur > 0:
                 chain += f",gblur=sigma={blur:.1f}"

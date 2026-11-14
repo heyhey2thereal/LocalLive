@@ -90,6 +90,25 @@ export default function Scenes() {
     setSelectedLayer(null)
   }
 
+  // Pull a stored layer back inside the frame. Older scenes (or a resize done
+  // before clamping existed) could hold a box larger than the canvas, which made
+  // its handles unreachable. Normalising on open guarantees every layer can be
+  // grabbed again.
+  const fitLayer = (l: SceneLayer, w: number, h: number): SceneLayer => {
+    const width = Math.max(8, Math.min(l.width ?? Math.round(w * 0.25), w))
+    const height = Math.max(8, Math.min(l.height ?? Math.round((l.width ?? w * 0.25) * 9 / 16), h))
+    return {
+      ...l,
+      width,
+      height,
+      x: Math.max(0, Math.min(l.x, w - width)),
+      y: Math.max(0, Math.min(l.y, h - height)),
+    }
+  }
+
+  const openScene = (s: Scene) =>
+    setEditing({ ...s, layers: s.layers.map((l) => fitLayer(l, s.width, s.height)) })
+
   const setLayers = (layers: SceneLayer[]) => {
     if (editing) setEditing({ ...editing, layers })
   }
@@ -223,7 +242,7 @@ export default function Scenes() {
       ) : (
         <div className="media-grid">
           {scenes.map((s) => (
-            <div key={s.id} className="media-card" onClick={() => setEditing({ ...s })}>
+            <div key={s.id} className="media-card" onClick={() => openScene(s)}>
               <div className="media-thumb" style={{ background: s.background, aspectRatio: `${s.width}/${s.height}` }}>
                 <SceneThumb scene={s} media={media} />
                 <div className="scene-thumb-badge text-sm">{s.layers.length} calques</div>

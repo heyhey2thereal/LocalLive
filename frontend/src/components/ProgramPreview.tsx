@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { EngineItem, Media, Scene, SceneLayer } from '../api'
+import { layerAnimation } from '../lib/animations'
 
 interface SceneLike {
   width: number
@@ -47,11 +48,17 @@ export function SceneRender({
   media,
   width,
   preferThumb = false,
+  animate = false,
+  layerDuration = 0,
 }: {
   scene: SceneLike
   media: Media[]
   width: number
   preferThumb?: boolean
+  /** Play the layers' IN/LOOP/OUT animations (monitors + editor). */
+  animate?: boolean
+  /** On-air duration of each layer, used to delay OUT animations. */
+  layerDuration?: number
 }) {
   const scale = width / scene.width
   return (
@@ -83,10 +90,12 @@ export function SceneRender({
             const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
             lh = Math.round(lw * ratio)
           }
+          const blur = l.blur ?? 0
+          const anim = animate ? layerAnimation(l, layerDuration, width) : null
           return (
             <div
               key={i}
-              className="scene-layer"
+              className={`scene-layer ${anim ? anim.className : ''}`}
               style={{
                 left: l.x * scale,
                 top: l.y * scale,
@@ -97,24 +106,27 @@ export function SceneRender({
                 fontSize: isBox ? (l.font_size ?? 32) * scale : undefined,
                 background: isBox ? l.background ?? 'transparent' : 'transparent',
                 padding: isBox ? '4px 8px' : 0,
-                transform: l.rotation ? `rotate(${l.rotation}deg)` : undefined,
+                transform: !anim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
                 zIndex: (l.z ?? 0) + 1,
+                ...(anim ? anim.style : {}),
               }}
             >
-              {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
-              {isMedia && !imgSrc && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.type}</span>}
-              {!isMedia && !isBox && badge && (
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{badge}</span>
-              )}
-              {l.type === 'chat' && <span style={{ fontSize: 12, color: 'var(--text-2)' }}>💬 {l.chat_source ?? 'chat'}</span>}
-              {l.type === 'countdown' && (
-                <Countdown
-                  total={l.countdown_seconds ?? 60}
-                  mode={l.countdown_mode ?? 'down'}
-                  fontPx={(l.font_size ?? 96) * scale}
-                />
-              )}
-              {isText && (l.text || 'Texte')}
+              <span className="scene-layer-inner" style={{ filter: blur ? `blur(${blur * scale}px)` : undefined }}>
+                {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
+                {isMedia && !imgSrc && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.type}</span>}
+                {!isMedia && !isBox && badge && (
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{badge}</span>
+                )}
+                {l.type === 'chat' && <span style={{ fontSize: 12, color: 'var(--text-2)' }}>💬 {l.chat_source ?? 'chat'}</span>}
+                {l.type === 'countdown' && (
+                  <Countdown
+                    total={l.countdown_seconds ?? 60}
+                    mode={l.countdown_mode ?? 'down'}
+                    fontPx={(l.font_size ?? 96) * scale}
+                  />
+                )}
+                {isText && (l.text || 'Texte')}
+              </span>
             </div>
           )
         })}
@@ -125,7 +137,19 @@ export function SceneRender({
 // Fills its container: measures the parent and renders the scene at that exact
 // size, so the monitor never grows/shrinks because of a big image. The aspect
 // ratio is preserved by the parent (which owns the 16:9 box).
-export function FitScene({ scene, media, preferThumb }: { scene: SceneLike; media: Media[]; preferThumb?: boolean }) {
+export function FitScene({
+  scene,
+  media,
+  preferThumb,
+  animate = false,
+  layerDuration = 0,
+}: {
+  scene: SceneLike
+  media: Media[]
+  preferThumb?: boolean
+  animate?: boolean
+  layerDuration?: number
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
   useEffect(() => {
@@ -139,7 +163,16 @@ export function FitScene({ scene, media, preferThumb }: { scene: SceneLike; medi
   }, [])
   return (
     <div ref={ref} className="fit-scene">
-      {w > 0 && <SceneRender scene={scene} media={media} width={w} preferThumb={preferThumb} />}
+      {w > 0 && (
+        <SceneRender
+          scene={scene}
+          media={media}
+          width={w}
+          preferThumb={preferThumb}
+          animate={animate}
+          layerDuration={layerDuration}
+        />
+      )}
     </div>
   )
 }
@@ -164,11 +197,13 @@ function MediaRender({
   width,
   sound,
   reloadKey,
+  animate,
 }: {
   item: EngineItem
   width: number
   sound: boolean
   reloadKey?: string | number
+  animate: boolean
 }) {
   const [scene, setScene] = useState<SceneLike | null>(null)
   const [media, setMedia] = useState<Media[]>([])
@@ -200,7 +235,15 @@ function MediaRender({
 
   if (item.scene_id) {
     if (!ready || !scene) return <div className="stage-empty">Chargement…</div>
-    return <FitScene scene={scene} media={media} preferThumb={width < 480} />
+    return (
+      <FitScene
+        scene={scene}
+        media={media}
+        preferThumb={width < 480}
+        animate={animate}
+        layerDuration={item.duration}
+      />
+    )
   }
   if (item.kind === 'image' && item.stream_url) {
     return <img className="fit-media" src={item.stream_url} alt={item.title} />
@@ -235,9 +278,18 @@ interface Props {
   width: number
   sound?: boolean
   reloadKey?: string | number
+  /** Play the scene layers' IN/LOOP/OUT animations (monitors). */
+  animate?: boolean
 }
 
-export default function ProgramPreview({ item, emptyLabel, width, sound = false, reloadKey }: Props) {
+export default function ProgramPreview({
+  item,
+  emptyLabel,
+  width,
+  sound = false,
+  reloadKey,
+  animate = false,
+}: Props) {
   const tileRef = useRef<HTMLDivElement>(null)
   // Enabling sound is allowed once the user has interacted; the full-screen
   // button counts as that interaction, so the audio plays right away.
@@ -255,7 +307,7 @@ export default function ProgramPreview({ item, emptyLabel, width, sound = false,
   }
   return (
     <div className="program-tile" ref={tileRef}>
-      <MediaRender item={item} width={width} sound={soundOn} reloadKey={reloadKey} />
+      <MediaRender item={item} width={width} sound={soundOn} reloadKey={reloadKey} animate={animate} />
       <button
         className="program-fullscreen"
         title="Plein écran (avec son)"

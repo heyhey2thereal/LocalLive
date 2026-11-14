@@ -175,5 +175,62 @@ def test_take_requires_admin(installed):
     assert installed.post("/api/broadcast/take", json={"playlist_id": 1}).status_code == 401
 
 
+def _output_destinations(engine, output):
+    return [dest for _, dest in engine._resolve_outputs(output)]
+
+
+def test_output_selection_primary_only(authed):
+    from app.engine import OutputConfig, PlaybackEngine
+
+    authed.put("/api/broadcast/settings", json={"output_kind": "rtmp",
+                                                "stream_rtmp_url": "rtmp://primary/live"})
+    authed.post("/api/streams", json=STREAM)
+    engine = PlaybackEngine()
+    output = OutputConfig(kind="rtmp", rtmp_url="rtmp://primary/live", stream_key="k")
+    engine._output_id = "primary"
+    assert _output_destinations(engine, output) == ["rtmp://primary/live/k"]
+
+
+def test_output_selection_specific_stream(authed):
+    from app.engine import OutputConfig, PlaybackEngine
+
+    authed.put("/api/broadcast/settings", json={"output_kind": "rtmp",
+                                                "stream_rtmp_url": "rtmp://primary/live"})
+    sid = authed.post("/api/streams", json=STREAM).json()["id"]
+    engine = PlaybackEngine()
+    output = OutputConfig(kind="rtmp", rtmp_url="rtmp://primary/live", stream_key="k")
+    engine._output_id = sid
+    dests = _output_destinations(engine, output)
+    assert dests == ["rtmp://a.rtmp.youtube.com/live2/abcd-1234-efgh-5678"]
+
+
+def test_output_selection_all_fans_out(authed):
+    from app.engine import OutputConfig, PlaybackEngine
+
+    authed.put("/api/broadcast/settings", json={"output_kind": "rtmp",
+                                                "stream_rtmp_url": "rtmp://primary/live"})
+    authed.post("/api/streams", json=STREAM)
+    engine = PlaybackEngine()
+    output = OutputConfig(kind="rtmp", rtmp_url="rtmp://primary/live", stream_key="k")
+    engine._output_id = "all"
+    dests = _output_destinations(engine, output)
+    assert len(dests) == 2
+    assert "rtmp://primary/live/k" in dests
+    assert "rtmp://a.rtmp.youtube.com/live2/abcd-1234-efgh-5678" in dests
+
+
+def test_start_with_output_id_persists_target(authed, tmp_path):
+    pid = _playlist_with_video(authed, tmp_path)
+    authed.put("/api/broadcast/settings", json={
+        "output_kind": "file",
+        "output_file": str(tmp_path / "out.ts"),
+        "stream_width": 160, "stream_height": 120,
+    })
+    r = authed.post("/api/broadcast/start", json={"playlist_id": pid, "output_id": "primary"})
+    assert r.status_code == 200, r.text
+    assert r.json()["state"]["output"]["target_id"] == "primary"
+    authed.post("/api/broadcast/stop")
+
+
 def test_preview_requires_auth(installed):
     assert installed.get("/api/broadcast/preview").status_code == 401
