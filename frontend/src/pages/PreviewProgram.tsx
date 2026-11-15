@@ -13,6 +13,12 @@ import MusicBar from '../components/MusicBar'
 import { formatDuration, formatUptime, Loading, Modal, useToast } from '../components/ui'
 import { IconArrowRight, IconPlay, IconStop } from '../components/icons'
 import { setMonitorPageVisible } from '../lib/monitorSound'
+import {
+  getPreviewSnapshot,
+  setPreviewIndex as setPreviewClockIndex,
+  setPreviewPlaylist,
+  subscribePreviewClock,
+} from '../lib/previewClock'
 
 // Map a transition id to a CSS animation class used to animate the monitors.
 function transitionClass(id: string): string {
@@ -142,22 +148,30 @@ export default function PreviewProgram() {
 
   // The preview monitor walks through the playlist on its own timer, advancing to
   // the next item once the current one's duration has elapsed (so a 5 s scene is
-  // followed by the next item). Reset whenever the playlist changes.
-  const [previewIndex, setPreviewIndex] = useState(0)
+  // followed by the next item). The walk lives in previewClock.ts — outside React
+  // — so it keeps advancing while the operator is on another page and resumes at
+  // the right item instead of restarting from the first.
   const previewItems = preview?.items ?? []
+  const [previewIndex, setPreviewIndexLocal] = useState(0)
   useEffect(() => {
-    setPreviewIndex(0)
-  }, [preview?.playlist_id])
-  useEffect(() => {
-    if (previewItems.length <= 1) return
-    const current = previewItems[previewIndex] ?? previewItems[0]
-    const seconds = Math.max(0.5, current?.duration || 5)
-    const t = window.setTimeout(() => {
-      setPreviewIndex((i) => (i + 1) % previewItems.length)
-    }, seconds * 1000)
-    return () => window.clearTimeout(t)
+    // Wait for the first poll result before syncing: on a remount `preview` is
+    // briefly undefined, and syncing an empty list would reset the clock.
+    if (!preview) return
+    setPreviewPlaylist(preview.playlist_id ?? null, previewItems)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewIndex, preview?.playlist_id, previewItems.map((i) => i.id).join(','), previewItems.map((i) => i.duration).join(',')])
+  }, [preview?.playlist_id, previewItems.map((i) => i.id).join(','), previewItems.map((i) => i.duration).join(',')])
+  useEffect(() => {
+    // Catch up immediately on mount/return, then tick so the monitor advances
+    // while it is shown (the clock itself is derived from wall-clock time).
+    const apply = () => setPreviewIndexLocal(getPreviewSnapshot().index)
+    apply()
+    const unsub = subscribePreviewClock((s) => setPreviewIndexLocal(s.index))
+    const t = window.setInterval(apply, 250)
+    return () => {
+      unsub()
+      window.clearInterval(t)
+    }
+  }, [])
 
   const previewItem: EngineItem | null = preview?.items[previewIndex] ?? null
   const programItem: EngineItem | null = program?.current ?? null
@@ -475,7 +489,7 @@ export default function PreviewProgram() {
               <div
                 key={item.id}
                 className="row"
-                onClick={() => setPreviewIndex(i)}
+                onClick={() => setPreviewClockIndex(i)}
                 title="Afficher cet élément dans l'aperçu"
                 style={{
                   padding: '6px 10px',

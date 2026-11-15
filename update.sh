@@ -42,7 +42,12 @@ if [[ "${REPO_ROOT}" != "${APP_DIR}" ]]; then
   cp -a "${REPO_ROOT}/frontend/." "${APP_DIR}/frontend/" || die "Copie du frontend impossible."
   cp -a "${REPO_ROOT}/scripts" "${APP_DIR}/" 2>/dev/null || true
   cp -f "${REPO_ROOT}/update.sh" "${REPO_ROOT}/backup.sh" "${REPO_ROOT}/uninstall.sh" "${APP_DIR}/" 2>/dev/null || true
-cp -f "${REPO_ROOT}/CHANGELOG.md" "${REPO_ROOT}/VERSION" "${APP_DIR}/" 2>/dev/null || true
+  cp -f "${REPO_ROOT}/CHANGELOG.md" "${REPO_ROOT}/VERSION" "${APP_DIR}/" 2>/dev/null || true
+  # Refresh the installed self-update helper too, so a fix to it reaches an
+  # existing install (a stale helper would otherwise never be replaced).
+  if [[ -f "${REPO_ROOT}/scripts/locallive-update" ]]; then
+    install -m 0755 "${REPO_ROOT}/scripts/locallive-update" /usr/local/sbin/locallive-update 2>/dev/null || true
+  fi
   log_ok "Code mis à jour"
 else
   log_warn "Le dépôt est déjà dans ${APP_DIR} — étape ignorée."
@@ -69,6 +74,22 @@ log_ok "Interface recompilée"
 # ---------------------------------------------------------------------------
 step_next "Redémarrage du service"
 chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}"
+# Repair an older install so the "Mettre à jour" button keeps working:
+#  * an old unit carried NoNewPrivileges=true, which blocks the setuid `sudo`
+#    the service user needs to run the updater — drop that line;
+#  * make sure the restricted sudoers rule and the helper are present.
+UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
+if [[ -f "${UNIT}" ]] && grep -q '^NoNewPrivileges=true' "${UNIT}"; then
+  sed -i '/^NoNewPrivileges=true/d' "${UNIT}"
+  log_warn "NoNewPrivileges retiré de ${UNIT} (nécessaire pour la mise à jour)"
+fi
+if [[ ! -f /etc/sudoers.d/locallive-update && -f "${APP_DIR}/scripts/locallive-update" ]]; then
+  install -m 0755 "${APP_DIR}/scripts/locallive-update" /usr/local/sbin/locallive-update 2>/dev/null || true
+  printf '# Allow the LocalLive service user to run the updater without a password.\n%s ALL=(root) NOPASSWD: /usr/local/sbin/locallive-update\n' \
+    "${APP_USER}" >"/etc/sudoers.d/locallive-update" 2>/dev/null || true
+  chmod 0440 "/etc/sudoers.d/locallive-update" 2>/dev/null || true
+  log_ok "Règle sudoers de mise à jour réinstallée"
+fi
 systemctl daemon-reload
 systemctl start "${SERVICE_NAME}"
 sleep 2

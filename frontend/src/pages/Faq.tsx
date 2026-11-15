@@ -108,6 +108,14 @@ const SECTIONS: Section[] = [
         q: 'Mes modifications de playlist sont-elles prises en compte en direct ?',
         a: "Oui. Si la playlist modifiée est celle qui est à l'antenne, le moteur la recharge aussitôt et reprend au même élément. Les autres playlists (et l'aperçu) ne sont pas touchés.",
       },
+      {
+        q: 'L’aperçu continue-t-il quand je quitte la page ?',
+        a: "Oui. Le défilement de l'aperçu (passage d'une scène à l'autre selon leur durée) continue en arrière-plan, comme la musique. En revenant sur la page, l'aperçu reprend sur l'élément qui devrait être en cours, il ne repart pas du premier.",
+      },
+      {
+        q: 'La programmation bascule-t-elle vraiment la playlist toute seule ?',
+        a: "Oui, pendant le direct. À l'heure et au jour d'un programme, le moteur bascule automatiquement la playlist à l'antenne. À l'arrêt du direct, la programmation ne touche pas au programme que vous préparez.",
+      },
     ],
   },
   {
@@ -145,6 +153,10 @@ const SECTIONS: Section[] = [
       {
         q: 'Comment mettre à jour LocalLive ?',
         a: "Onglet Paramètres → « Mettre à jour » : l'application applique la dernière version et redémarre. Un message s'affiche une seule fois à la réouverture.",
+      },
+      {
+        q: 'Le bouton « Mettre à jour » demande une configuration manuelle, pourquoi ?',
+        a: "Cela arrivait quand le service ne pouvait pas exécuter l'outil de mise à jour (droits sudo bloqués, outil obsolète, ou paquet sudo absent). Les versions 2.15.1+ corrigent ces points : relancez install.sh sur le serveur (ou une mise à jour manuelle) pour les appliquer une dernière fois.",
       },
       {
         q: 'Comment sauvegarder ma configuration ?',

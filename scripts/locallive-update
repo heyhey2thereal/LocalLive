@@ -5,6 +5,14 @@
 # from that fresh checkout. Intended to be run by the service user through a
 # restricted sudoers rule (see install.sh). Prints a short status and exits
 # non-zero on failure.
+#
+# IMPORTANT: update.sh stops the service. When this script is launched by the
+# service itself (the "Mettre à jour" button), the stop would kill it too: the
+# updater is a child of the service cgroup, and systemd stops the whole cgroup.
+# The work therefore runs in a *transient systemd unit* (systemd-run), outside
+# the service cgroup, so the service can be stopped and restarted while the
+# update keeps running. The detached run records the "updated to X" notice in
+# the database once it succeeds.
 
 set -uo pipefail
 
@@ -12,6 +20,7 @@ APP_DIR="${APP_DIR:-/opt/locallive}"
 DATA_DIR="${DATA_DIR:-/var/lib/locallive}"
 CONF_DIR="${CONF_DIR:-/etc/locallive}"
 SRC_DIR="${SRC_DIR:-${DATA_DIR}/update-src}"
+VENV_DIR="${VENV_DIR:-${APP_DIR}/venv}"
 
 # Read LOCALLIVE_UPDATE_REPO / LOCALLIVE_UPDATE_BRANCH from the env file if set.
 if [[ -f "${CONF_DIR}/locallive.env" ]]; then
@@ -20,6 +29,27 @@ if [[ -f "${CONF_DIR}/locallive.env" ]]; then
 fi
 REPO="${LOCALLIVE_UPDATE_REPO:-}"
 BRANCH="${LOCALLIVE_UPDATE_BRANCH:-main}"
+
+# --- Detach from the caller's cgroup --------------------------------------
+# Re-exec ourselves inside a transient unit so stopping the service does not
+# kill the update. `LOCALLIVE_UPDATE_DETACHED` marks the inner run; a host
+# without systemd-run falls back to running inline.
+if [[ "${LOCALLIVE_UPDATE_DETACHED:-0}" != "1" ]] && command -v systemd-run >/dev/null 2>&1; then
+  if systemd-run --quiet --collect --no-block --unit=locallive-update \
+       --description="LocalLive update" \
+       --setenv=LOCALLIVE_UPDATE_DETACHED=1 \
+       --setenv=APP_DIR="${APP_DIR}" --setenv=DATA_DIR="${DATA_DIR}" \
+       --setenv=CONF_DIR="${CONF_DIR}" --setenv=SRC_DIR="${SRC_DIR}" \
+       "${BASH_SOURCE[0]}" "$@"; then
+    # Machine-readable marker so the API knows the update runs in the
+    # background (it must not announce a version that has not been applied yet).
+    echo "==> Mise à jour lancée en arrière-plan (unité locallive-update)"
+    echo "LOCALLIVE_UPDATE_DETACHED_OK"
+    exit 0
+  fi
+  # Fall through to the inline path when systemd-run refuses (no PID1 access).
+  echo "! systemd-run indisponible, mise à jour en direct" >&2
+fi
 
 if [[ -z "${REPO}" ]]; then
   echo "Aucun dépôt de mise à jour configuré (LOCALLIVE_UPDATE_REPO)." >&2
@@ -47,3 +77,17 @@ echo "==> Application de la mise à jour"
 # and service restart, and verifies the service came back up.
 APP_DIR="${APP_DIR}" DATA_DIR="${DATA_DIR}" CONF_DIR="${CONF_DIR}" \
   bash "${SRC_DIR}/update.sh"
+STATUS=$?
+
+# Record the "updated to X" notice for the interface (shown once, next open).
+# Read the freshly written VERSION, not the version we left.
+if [[ "${STATUS}" -eq 0 && -f "${APP_DIR}/VERSION" ]]; then
+  VERSION_VALUE="$(head -n1 "${APP_DIR}/VERSION" | tr -d '[:space:]')"
+  if [[ -n "${VERSION_VALUE}" && -x "${VENV_DIR}/bin/python" ]]; then
+    LOCALLIVE_DATA="${DATA_DIR}" "${VENV_DIR}/bin/python" -c \
+      "import sys; sys.path.insert(0, '${APP_DIR}/backend'); from app import db; db.set_setting('pending_update_notice', '${VERSION_VALUE}')" \
+      2>/dev/null || true
+  fi
+fi
+
+exit "${STATUS}"

@@ -187,6 +187,39 @@ export default function Settings() {
     }
   }
 
+  // Wait for the service to come back after a background update, then reload.
+  // The update restarts the service, so its API is briefly unavailable. We only
+  // reload once the service has actually gone down and come back (or its version
+  // changed), otherwise we would reload while the *old* instance is still up.
+  const waitForRestart = async (previousVersion: string | undefined) => {
+    const deadline = Date.now() + 10 * 60 * 1000 // 10 minutes max (npm build can be slow)
+    let sawDown = false
+    // Give the updater a moment to start stopping the service before probing.
+    await new Promise((r) => setTimeout(r, 3000))
+    while (Date.now() < deadline) {
+      try {
+        const health = await api.get<{ status: string; version: string }>('/api/health')
+        if (health?.status === 'ok') {
+          const versionChanged = previousVersion && health.version !== previousVersion
+          if (sawDown || versionChanged) {
+            setUpdateMsg(
+              versionChanged ? `Mise à jour vers la version ${health.version} terminée. Rechargement…` : 'Service redémarré. Rechargement…',
+            )
+            await new Promise((r) => setTimeout(r, 1200))
+            window.location.reload()
+            return
+          }
+          // Still the old instance (the updater has not stopped it yet).
+        }
+      } catch {
+        sawDown = true
+      }
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+    setUpdateState('done')
+    setUpdateMsg('Mise à jour lancée. Rechargez la page dans quelques instants.')
+  }
+
   const runUpdate = async () => {
     setUpdateState('checking')
     setUpdateMsg('Vérification…')
@@ -194,13 +227,23 @@ export default function Settings() {
     // runs unprivileged and cannot update itself, so when no command is set (or
     // it fails) we show the exact shell commands to run on the host.
     try {
-      const res = await api.post<{ ok: boolean; manual?: boolean; hint?: string; error?: string }>(
-        '/api/system/update',
-        {},
-      )
+      const previousVersion = version?.version
+      const res = await api.post<{
+        ok: boolean
+        manual?: boolean
+        detached?: boolean
+        hint?: string
+        error?: string
+      }>('/api/system/update', {})
       if (res.ok) {
-        setUpdateState('done')
+        setUpdateState('updating')
         setUpdateMsg('Mise à jour appliquée. Redémarrage du service…')
+        if (res.detached) {
+          // The helper runs in the background (it stops/restarts the service).
+          setUpdateMsg('Mise à jour en cours… Le service va redémarrer.')
+          await waitForRestart(previousVersion)
+          return
+        }
         await new Promise((r) => setTimeout(r, 1500))
         window.location.reload()
         return
@@ -209,7 +252,7 @@ export default function Settings() {
       setUpdateOpen(false)
       push({
         kind: 'info',
-        title: 'Mise à jour manuelle requise',
+        title: res.manual ? 'Mise à jour manuelle requise' : 'Mise à jour impossible',
         message: res.hint ?? res.error ?? 'Lancez update.sh sur le serveur.',
       })
     } catch (err: any) {

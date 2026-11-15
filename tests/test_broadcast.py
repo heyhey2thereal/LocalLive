@@ -1,6 +1,7 @@
 """Broadcast control and system monitoring tests."""
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 from pathlib import Path
@@ -244,3 +245,72 @@ def test_take_while_stopped_lines_up_the_programme(authed, tmp_path):
     preview = authed.get("/api/broadcast/preview").json()
     assert preview["program"]["playlist_id"] == pid
     assert preview["program"]["running"] is False
+
+
+def test_schedule_switches_live_playlist(authed, tmp_path):
+    """The scheduler swaps the on-air playlist when a programme becomes active.
+
+    Regression: nothing ever consulted the schedule while the live was running,
+    so a scheduled playlist never reached the programme.
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    from app import db
+    from app.engine import PlaybackEngine
+
+    first = _setup_playlist(authed, tmp_path)
+    v = tmp_path / "second.mp4"
+    _make_video(v)
+    with v.open("rb") as fh:
+        item = authed.post("/api/media/upload", files={"files": (v.name, fh, "video/mp4")}).json()["items"][0]
+    second = authed.post("/api/playlists", json={"name": "Soir"}).json()["id"]
+    authed.post(f"/api/playlists/{second}/items", json={"media_id": item["id"]})
+
+    authed.put("/api/broadcast/settings", json={
+        "output_kind": "file",
+        "output_file": str(tmp_path / "sched.ts"),
+        "stream_width": 160, "stream_height": 120,
+        "timezone": "UTC",
+    })
+    assert authed.post("/api/broadcast/start", json={"playlist_id": first}).status_code == 200
+
+    engine = PlaybackEngine()
+    engine._config = engine._build_output_config({})
+    try:
+        # A schedule that is active now must point the live at `second`.
+        now = _dt.datetime.now(ZoneInfo("UTC"))
+        start = (now - _dt.timedelta(minutes=1)).strftime("%H:%M")
+        end = (now + _dt.timedelta(minutes=5)).strftime("%H:%M")
+        db.execute(
+            "INSERT INTO schedules(name, playlist_id, days, start_time, end_time, enabled) VALUES(?,?,?,?,?,1)",
+            ("Soir", second, json.dumps([now.weekday()]), start, end),
+        )
+        engine._state.running = True
+        engine._state.playlist_id = first
+        engine._apply_schedule_once()
+        assert engine._state.playlist_id == second
+    finally:
+        authed.post("/api/broadcast/stop")
+
+
+def test_schedule_does_not_touch_stopped_broadcast(authed, tmp_path):
+    """With the live stopped the schedule must not force a programme."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    from app import db
+    from app.engine import PlaybackEngine
+
+    pid = _setup_playlist(authed, tmp_path)
+    now = _dt.datetime.now(ZoneInfo("UTC"))
+    db.execute(
+        "INSERT INTO schedules(name, playlist_id, days, start_time, end_time, enabled) VALUES(?,?,?,?,?,1)",
+        ("Jour", pid, "[]", (now - _dt.timedelta(minutes=1)).strftime("%H:%M"), (now + _dt.timedelta(minutes=5)).strftime("%H:%M")),
+    )
+    engine = PlaybackEngine()
+    engine._state.running = False
+    engine._state.playlist_id = None
+    engine._apply_schedule_once()
+    assert engine._state.playlist_id is None
+

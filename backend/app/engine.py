@@ -99,6 +99,8 @@ class PlaybackEngine:
         self._progress_thread: threading.Thread | None = None
         self._config: OutputConfig | None = None
         self._desired: dict[str, Any] | None = None
+        self._scheduler: threading.Thread | None = None
+        self._sched_stop = threading.Event()
         # Which output(s) to feed. None = historical fan-out (primary + enabled
         # streams); 'primary' = only the main output; int = the matching stream;
         # 'all' = explicit fan-out.
@@ -157,17 +159,21 @@ class PlaybackEngine:
             self._spawn(items, output)
             self._supervisor = threading.Thread(target=self._supervise, name="engine-supervisor", daemon=True)
             self._supervisor.start()
+            self._start_scheduler()
             return {"ok": True, "state": self.status()}
 
     def stop(self) -> dict[str, Any]:
         with self._lock:
             self._stop_event.set()
+            self._sched_stop.set()
             self._terminate_process()
             self._state.running = False
             self._state.starting = False
             self._state.pid = None
         if self._supervisor and self._supervisor.is_alive():
             self._supervisor.join(timeout=3)
+        if self._scheduler and self._scheduler.is_alive():
+            self._scheduler.join(timeout=3)
         return {"ok": True}
 
     def pause(self) -> dict[str, Any]:
@@ -590,6 +596,62 @@ class PlaybackEngine:
                 break
             self._spawn(items, cfg)
 
+    # ------------------------------------------------------------------
+    # Schedule automation
+    # ------------------------------------------------------------------
+    def _start_scheduler(self) -> None:
+        """Start the background thread that switches playlists on schedule.
+
+        The scheduler compares the playlist the schedule says should be live with
+        the one on air, and swaps it when they differ. A 20 s period is short
+        enough for a programme change to be near-instant without polling the
+        database hard on the small target host.
+        """
+        if self._scheduler and self._scheduler.is_alive():
+            return
+        self._sched_stop.clear()
+        self._scheduler = threading.Thread(target=self._run_scheduler, name="engine-scheduler", daemon=True)
+        self._scheduler.start()
+
+    def _run_scheduler(self) -> None:
+        while not self._sched_stop.wait(20):
+            try:
+                self._apply_schedule_once()
+            except Exception:  # never let the thread die on a transient error
+                log.exception("Erreur du planificateur de programmes")
+
+    def _apply_schedule_once(self) -> None:
+        """Swap the live playlist if a programme window now points elsewhere.
+
+        Only runs while the broadcast is active: with the live stopped, the
+        operator keeps full control of the programme lined up in the monitor.
+        Only *scheduled* windows are followed (never the fallback playlist), so a
+        manual take is not overridden when no programme is active.
+        """
+        from .routers.schedules import scheduled_playlist_id
+
+        with self._lock:
+            if not self._state.running or self._stop_event.is_set():
+                return
+            target = scheduled_playlist_id()
+            if not target or target == self._state.playlist_id:
+                return
+            row = db.query_one("SELECT name FROM playlists WHERE id = ?", (target,))
+            if not row:
+                return
+            items = self._resolve_items(target)
+            if not items:
+                return
+            log.info("Programme : bascule automatique vers la playlist %s", target)
+            self._state.playlist_id = target
+            self._state.playlist_name = row["name"]
+            self._state.items = [_public_item(i) for i in items]
+            self._state.cycle_duration = sum(i["duration"] for i in items)
+            self._state.current_index = 0
+            self._state.position = 0.0
+            self._desired = {"playlist_id": target, "items": items}
+            self._terminate_process()  # supervisor restarts with the new playlist
+
     def _terminate_process(self) -> None:
         process = self._process
         if process and process.poll() is None:
@@ -772,16 +834,25 @@ class PlaybackEngine:
                 self._scene_graph(item, filters, add_input, w, h, fps, font, n)
                 self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
             else:  # video — reuse the same input for its video and audio streams
-                pre = ["-re"] if realtime else []
-                vi = add_input(pre + ["-i", item["path"]])
+                vi = add_input(["-i", item["path"]])
                 filters.append(f"[{vi}:v]{v_base},{v_tail}[v{n}]")
                 self._audio_segment(item, filters, add_input, n, dur, a_norm, vi)
 
         # --- assemble segments: cross-fades then background music ------------
         video = self._assemble_video(items, filters, len(items))
         audio = self._assemble_audio(items, filters, len(items))
-        filters.append(f"{video}null[outv]")
-        filters.append(f"{audio}anull[outa]")
+        # Pace the whole timeline to realtime *after* it has been assembled, so
+        # every item type (video, image, scene, audio) advances at wall-clock
+        # speed. Pacing the inputs individually only slowed video down; a
+        # playlist of scenes/images was rendered as fast as FFmpeg could go, so
+        # the programme jumped through the whole playlist in a fraction of a
+        # second (and never appeared to change scene).
+        if realtime:
+            filters.append(f"{video}realtime[outv]")
+            filters.append(f"{audio}arealtime[outa]")
+        else:
+            filters.append(f"{video}null[outv]")
+            filters.append(f"{audio}anull[outa]")
         video_maps, audio_maps = self._fanout_maps(filters, outputs, w, h)
         filter_complex = ";".join(filters)
 

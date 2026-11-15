@@ -3,6 +3,43 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.15.1] — 2026-11-15
+
+### Corrigé
+- **Le programme n’avançait pas d’une scène à l’autre** : le moteur ne cadencait
+  au rythme réel que les vidéos. Une playlist de scènes ou d’images était
+  produite aussi vite que FFmpeg le permettait (tout le cycle en une fraction de
+  seconde), donc le programme ne changeait jamais de scène. Le moteur cadençait
+  désormais **toute la chronologie** (`realtime`/`arealtime`) après assemblage :
+  chaque scène reste à l’antenne sa durée réelle.
+- **Bascule automatique des programmes** : la programmation hebdomadaire
+  (« bascule automatique de playlist selon l’heure et le jour ») n’était **jamais
+  appliquée** pendant le direct — le planificateur n’existait pas. Un fil
+  d’exécution compare désormais régulièrement l’heure courante à la
+  programmation et **bascule la playlist à l’antenne** au bon moment (sans
+  toucher au direct à l’arrêt, ni aux playlists choisies manuellement).
+- **Le changement de scène de l’aperçu repartait de zéro** en revenant sur la
+  page. L’horloge de l’aperçu vit maintenant **hors de l’interface**
+  (`previewClock.ts`) : elle **continue en arrière-plan**, comme la musique, et
+  l’aperçu reprend sur l’élément qui devrait être en cours au lieu du premier.
+- **Bouton « Mettre à jour »** : la mise à jour automatique échouait en
+  demandant une configuration manuelle. Quatre causes corrigées :
+  * le durcissement systemd `NoNewPrivileges=true` empêchait `sudo` d’obtenir
+    les droits root — retiré (la règle sudoers reste limitée à l’outil de mise
+    à jour) et l’ancienne unité est réparée par `update.sh` ;
+  * `update.sh` arrêtait le service, ce qui **tuait le programme de mise à jour**
+    (même groupe systemd) — il se détache désormais dans une **unité systemd
+    transitoire** (`systemd-run`), donc la mise à jour survit à l’arrêt ;
+  * l’outil de mise à jour installé n’était **jamais remplacé** par `update.sh` ;
+    il l’est maintenant ;
+  * le paquet `sudo` n’était pas installé — ajouté.
+  L’interface attend le redémarrage du service (sondage de `/api/health`) puis
+  recharge la page ; le message « Application mise à jour vers la version X »
+  n’apparaît qu’**après** la fin réelle de la mise à jour.
+- **Vérification des mises à jour** : si le dépôt publie des **tags sans
+  Release**, le contrôle ne trouvait rien. Il retombe désormais sur le tag le
+  plus récent (la plus haute version SemVer).
+
 ## [2.15.0] — 2026-11-15
 
 ### Ajouté

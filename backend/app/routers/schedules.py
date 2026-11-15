@@ -118,7 +118,24 @@ def delete_schedule(schedule_id: int, user: dict = Depends(require(permissions.C
 
 
 def active_playlist_id(now: datetime | None = None) -> int | None:
-    """Return the playlist id that should be live right now (or None)."""
+    """Return the playlist id that should be live right now (or None).
+
+    Considers enabled schedules first, then the configured fallback playlist.
+    """
+    scheduled = scheduled_playlist_id(now)
+    if scheduled:
+        return scheduled
+    fallback = db.get_setting("fallback_playlist_id")
+    # A stored "0" (or empty) means "no fallback" — never a playlist id.
+    return int(fallback) if fallback and int(fallback) > 0 else None
+
+
+def scheduled_playlist_id(now: datetime | None = None) -> int | None:
+    """Playlist of the schedule window active right now (ignoring the fallback).
+
+    Used by the engine's background scheduler: it must follow *programmes* only,
+    so a manual take is never overridden by the fallback playlist.
+    """
     tz_name = db.get_setting("timezone", "Europe/Paris") or "Europe/Paris"
     try:
         tz = ZoneInfo(tz_name)
@@ -150,9 +167,7 @@ def active_playlist_id(now: datetime | None = None) -> int | None:
                 return row["playlist_id"]
             if previous_day in days and current < end:
                 return row["playlist_id"]
-    fallback = db.get_setting("fallback_playlist_id")
-    # A stored "0" (or empty) means "no fallback" — never a playlist id.
-    return int(fallback) if fallback and int(fallback) > 0 else None
+    return None
 
 
 @router.get("/current")

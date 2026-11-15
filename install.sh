@@ -50,8 +50,9 @@ run_with_spinner "Mise à jour de la liste des paquets" \
   env DEBIAN_FRONTEND=noninteractive apt-get update -qq || die "apt-get update a échoué."
 
 # sqlite3 backs up the database safely (online .backup, WAL-aware); gnupg is
-# required by the NodeSource repository script on a minimal Debian container.
-PKGS=(python3 python3-venv python3-pip ffmpeg curl ca-certificates fonts-dejavu-core sqlite3 gnupg)
+# required by the NodeSource repository script on a minimal Debian container;
+# sudo is required for the restricted self-update rule ("Mettre à jour").
+PKGS=(python3 python3-venv python3-pip ffmpeg curl ca-certificates fonts-dejavu-core sqlite3 gnupg sudo)
 run_with_spinner "Installation de Python, FFmpeg et outils" \
   env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}" \
   || die "L'installation des paquets système a échoué."
@@ -253,8 +254,11 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=${VENV_DIR}/bin/uvicorn app.main:app --host \${LOCALLIVE_HOST} --port \${LOCALLIVE_PORT} --workers 1
 Restart=always
 RestartSec=3
-# Hardening (the engine needs no privileges and no writable system paths)
-NoNewPrivileges=true
+# Hardening (the engine needs no privileges and no writable system paths).
+# NOTE: NoNewPrivileges is deliberately NOT set. The service user runs the
+# self-updater through a restricted sudoers rule ("Mettre à jour" button);
+# NoNewPrivileges would stop the setuid `sudo` binary from gaining root, so the
+# update could never run. The sudoers rule is narrowly scoped to the updater.
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true

@@ -161,3 +161,106 @@ def test_update_command_missing_returns_manual_hint(authed):
     res = authed.post("/api/system/update", json={}).json()
     assert res["ok"] is False
     assert res.get("manual") is True
+
+
+def test_update_detached_does_not_announce_a_version(authed, tmp_path):
+    """A detached update is still running: no 'updated' notice must be queued."""
+    from app import db
+
+    helper = tmp_path / "helper.sh"
+    helper.write_text("#!/usr/bin/env bash\necho LOCALLIVE_UPDATE_DETACHED_OK\n", encoding="utf-8")
+    helper.chmod(0o755)
+    authed.put("/api/broadcast/settings", json={"update_command": str(helper)})
+    db.set_setting("pending_update_notice", "")
+    res = authed.post("/api/system/update", json={}).json()
+    assert res["ok"] is True and res.get("detached") is True
+    # The notice is written by the background helper, not by the API here.
+    assert (db.get_setting("pending_update_notice", "") or "") == ""
+
+
+def test_update_sync_sets_notice_to_installed_version(authed, tmp_path):
+    """A synchronous success queues the freshly written VERSION, not __version__."""
+    from app import db, __version__
+
+    helper = tmp_path / "helper.sh"
+    helper.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    helper.chmod(0o755)
+    authed.put("/api/broadcast/settings", json={"update_command": str(helper)})
+    # Point _installed_version() at a fresh VERSION file.
+    version_file = tmp_path / "VERSION"
+    version_file.write_text("9.9.9\n", encoding="utf-8")
+    import app.routers.system as system
+
+    original = system._installed_version
+    system._installed_version = lambda: "9.9.9"
+    try:
+        db.set_setting("pending_update_notice", "")
+        res = authed.post("/api/system/update", json={}).json()
+        assert res["ok"] is True
+        assert db.get_setting("pending_update_notice") == "9.9.9"
+        assert db.get_setting("pending_update_notice") != __version__
+    finally:
+        system._installed_version = original
+
+
+def test_update_notice_is_one_shot(authed):
+    from app import db
+
+    db.set_setting("pending_update_notice", "2.16.0")
+    first = authed.get("/api/system/update-notice").json()
+    assert first == {"show": True, "version": "2.16.0"}
+    # Cleared on read, so it never shows twice.
+    assert authed.get("/api/system/update-notice").json() == {"show": False}
+
+
+def test_update_missing_command_file_returns_manual_hint(authed, tmp_path):
+    """A configured command that does not exist reports a manual hint, not a 500."""
+    missing = tmp_path / "does-not-exist.sh"
+    authed.put("/api/broadcast/settings", json={"update_command": str(missing)})
+    res = authed.post("/api/system/update", json={}).json()
+    assert res["ok"] is False
+    assert res.get("manual") is True
+
+
+def test_latest_published_prefers_release_then_tags(monkeypatch):
+    """The update check prefers a Release, then falls back to the newest tag."""
+    import app.routers.system as system
+
+    # A Release is present: it wins, and no tags call is needed.
+    calls: list[str] = []
+
+    def release_get(url):
+        calls.append(url)
+        assert "/releases/latest" in url
+        return {"tag_name": "v2.16.0"}
+
+    monkeypatch.setattr(system, "_github_get", release_get)
+    assert system._latest_published("owner/repo") == "2.16.0"
+    assert all("/tags" not in u for u in calls)
+
+    # No Release: fall back to the highest SemVer among the tags.
+    def tags_get(url):
+        if "/releases/latest" in url:
+            raise RuntimeError("404")
+        assert "/tags" in url
+        return [{"name": "v2.0.0"}, {"name": "v2.15.0"}, {"name": "v2.9.0"}, {"name": "v2.16.0"}]
+
+    monkeypatch.setattr(system, "_github_get", tags_get)
+    assert system._latest_published("owner/repo") == "2.16.0"
+
+
+def test_update_check_reports_tags_fallback(authed, monkeypatch):
+    """The endpoint reports an update when only a newer tag exists."""
+    import app.routers.system as system
+
+    def fake_get(url):
+        if "/releases/latest" in url:
+            raise RuntimeError("404")
+        return [{"name": "v99.0.0"}]
+
+    monkeypatch.setattr(system, "_github_get", fake_get)
+    authed.put("/api/broadcast/settings", json={"update_repo": "owner/repo"})
+    data = authed.get("/api/system/update/check").json()
+    assert data["repo"] == "owner/repo"
+    assert data["latest"] == "99.0.0"
+    assert data["update_available"] is True

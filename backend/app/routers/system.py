@@ -56,6 +56,46 @@ def _installed_version() -> str | None:
     return None
 
 
+def _github_get(url: str) -> Any:
+    """GET a GitHub API URL and return the parsed JSON (raises on failure)."""
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "LocalLive", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        return json.load(resp)
+
+
+def _latest_published(repo: str) -> str | None:
+    """Latest published version for "owner/repo", or None.
+
+    Prefers the latest published Release; falls back to the newest tag when the
+    repository publishes tags without a Release entry (or when the Releases API
+    is unavailable). Never raises: a network error simply yields None.
+    """
+    if not repo:
+        return None
+    try:
+        tag = _github_get(f"https://api.github.com/repos/{repo}/releases/latest").get("tag_name")
+        if tag:
+            return str(tag).lstrip("vV") or None
+    except Exception:
+        pass
+    try:
+        tags = _github_get(f"https://api.github.com/repos/{repo}/tags?per_page=30")
+        names = [str(t.get("name") or "").lstrip("vV") for t in tags] if isinstance(tags, list) else []
+        names = [n for n in names if n]
+        if names:
+            # GitHub does not guarantee tag order, so pick the highest SemVer.
+            return max(names, key=versioning.parse)
+    except Exception:
+        pass
+    return None
+
+
 @router.get("/update/check")
 def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
     """Compare the running version with the latest published tag.
@@ -71,20 +111,7 @@ def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
     branch = (db.get_setting("update_branch", "") or "").strip()
     if not branch:
         branch = os.environ.get("LOCALLIVE_UPDATE_BRANCH", "").strip() or "main"
-    latest = None
-    if repo:
-        import json
-        import urllib.request
-
-        try:
-            req = urllib.request.Request(
-                f"https://api.github.com/repos/{repo}/releases/latest",
-                headers={"User-Agent": "LocalLive", "Accept": "application/vnd.github+json"},
-            )
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                latest = (json.load(resp).get("tag_name") or "").lstrip("v") or None
-        except Exception:
-            latest = None
+    latest = _latest_published(repo)
     # Only offer an update when the published version is genuinely newer, so the
     # UI never nags when everything is already up to date.
     available = versioning.is_newer(latest, __version__)
@@ -105,14 +132,25 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
     install.sh, and the service user may run it through a restricted sudoers
     rule. We therefore fall back to that default command when none is stored, so
     the operator only ever has to click the button.
+
+    The helper detaches itself into a transient systemd unit (so stopping the
+    service does not kill the update) and prints `LOCALLIVE_UPDATE_DETACHED_OK`;
+    in that case the update is still running, so we must not announce a version
+    that has not been applied yet. The helper records the "updated" notice in
+    the database once it finishes.
     """
     command = (db.get_setting("update_command", "") or "").strip()
     if not command:
         # Prefer the standard helper if it is present on this host.
         from pathlib import Path
 
-        if Path("/usr/local/sbin/locallive-update").exists():
-            command = "sudo /usr/local/sbin/locallive-update"
+        helper = Path("/usr/local/sbin/locallive-update")
+        if helper.exists():
+            # Use sudo when available and non-root (the service user needs it to
+            # run the root-owned helper); otherwise run it directly.
+            import os
+
+            command = str(helper) if os.geteuid() == 0 else f"sudo {helper}"
     if not command:
         return {
             "ok": False,
@@ -129,15 +167,35 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "Délai dépassé pendant la mise à jour"}
+    except FileNotFoundError:
+        return {
+            "ok": False,
+            "manual": True,
+            "hint": "Commande de mise à jour introuvable. Relancez install.sh sur le serveur.",
+        }
+    output = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode == 0:
-        # Remember the version that was just applied so the UI can show a short
-        # "updated" notice exactly once, the next time someone opens the app.
-        # `__version__` is the *running* (old) version, so read the freshly
-        # written VERSION file instead of announcing the version we just left.
+        # Detached run: the real update is still in progress; the helper writes
+        # the "updated to X" notice itself when it succeeds.
+        if "LOCALLIVE_UPDATE_DETACHED_OK" in output:
+            return {"ok": True, "detached": True, "output": output[-2000:]}
+        # Synchronous run: remember the version that was just applied so the UI
+        # can show a short "updated" notice exactly once, next time someone opens
+        # the app. `__version__` is the *running* (old) version, so read the
+        # freshly written VERSION file instead.
         applied = _installed_version() or __version__
         db.set_setting("pending_update_notice", applied)
-        return {"ok": True, "output": (proc.stdout or "")[-2000:]}
-    return {"ok": False, "error": (proc.stderr or proc.stdout or "Échec de la mise à jour")[-2000:]}
+        return {"ok": True, "output": output[-2000:]}
+    # A non-zero exit may simply mean the helper could not detach (no systemd):
+    # in that case it reports a manual hint instead of a raw error.
+    if "sudo" in command and ("password" in output.lower() or "sudo:" in output.lower()):
+        return {
+            "ok": False,
+            "manual": True,
+            "hint": "Le service ne peut pas exécuter la mise à jour automatiquement. "
+                    "Relancez install.sh (règle sudoers) ou lancez update.sh sur le serveur.",
+        }
+    return {"ok": False, "error": (output or "Échec de la mise à jour")[-2000:]}
 
 
 @router.get("/update-notice")

@@ -178,3 +178,48 @@ def test_engine_loop_restarts(installed, tmp_path):
     status = engine.status()
     assert status["restarts"] >= 1
     engine.stop()
+
+
+def test_filter_command_paces_timeline_to_realtime(installed, tmp_path):
+    """The whole timeline must be paced with realtime/arealtime.
+
+    Regression: only video inputs carried `-re`, so a playlist of scenes/images
+    was rendered as fast as FFmpeg could go (the programme raced through the
+    whole playlist in a fraction of a second instead of one scene at a time).
+    """
+    s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = _make_playlist([])
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s1, 0, 2.0))
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s2, 1, 2.0))
+
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    cmd, pipeline = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(tmp_path / "o.ts"), width=320, height=240, fps=25, realtime=True)
+    )
+    assert pipeline == "filter"
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "realtime[outv]" in fc and "arealtime[outa]" in fc
+
+
+def test_scene_playlist_runs_at_wall_clock_speed(installed, tmp_path):
+    """End-to-end: two 2 s scenes must take ~4 s, not ~0.1 s."""
+    s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = _make_playlist([])
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s1, 0, 2.0))
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s2, 1, 2.0))
+
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    out = tmp_path / "scenes.ts"
+    cmd, _ = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(out), width=320, height=240, fps=25, realtime=True)
+    )
+    start = time.time()
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    elapsed = time.time() - start
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    # Real time is ~4 s; without pacing it was well under a second.
+    assert elapsed >= 3.5, f"paced too fast: {elapsed:.2f}s"
