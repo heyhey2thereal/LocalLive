@@ -1,57 +1,92 @@
-// Music bar shown at the bottom of the Aperçu page.
+// Sound console shown at the bottom of the Aperçu page.
 //
-// When the preview playlist carries background music, this bar shows the current
-// track, its visual (the waveform the server renders for the audio) and a
-// seekable progress bar: dragging the bar seeks the music forward or backward.
+// It follows the **program** when the live is running: the progress bar shows the
+// position of what is on air (from the engine, not a local guess), and dragging
+// it seeks the live. Pausing pauses the live too (the engine freezes); resuming
+// continues where it stopped.
 //
-// It owns its own <audio> element (separate from the monitor sound): the preview
-// page's music is heard here, while the live sound is controlled from the program
-// monitor.
+// When the live is stopped it falls back to the preview playlist: the current
+// track is played locally with a seekable bar.
 
 import { useEffect, useRef, useState } from 'react'
-import type { EngineItem } from '../api'
+import { api, type EngineItem, type EngineStatus } from '../api'
 import { formatDuration } from './ui'
 import { IconMusic } from './icons'
 
-/** The first preview item that carries background music, or null. */
-function musicItem(items: EngineItem[]): EngineItem | null {
+function firstWithMusic(items: EngineItem[]): EngineItem | null {
   for (const item of items) {
     if (item.background_audio_url) return item
   }
   return null
 }
 
-export default function MusicBar({ items }: { items: EngineItem[] }) {
-  const item = musicItem(items)
+export default function MusicBar({
+  items,
+  program,
+  onChanged,
+}: {
+  items: EngineItem[]
+  program: EngineStatus | null
+  onChanged: () => void
+}) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState(0)
-  const url = item?.background_audio_url ?? null
+  const [busy, setBusy] = useState(false)
 
-  // (Re)load the element whenever the track changes.
+  const running = Boolean(program?.running)
+  const programItem = program?.current ?? null
+  const previewItem = firstWithMusic(items)
+  // On air the console follows the program; otherwise the preview playlist.
+  const item = running ? programItem : previewItem
+  const url = item?.background_audio_url ?? null
+  const paused = Boolean(program?.paused)
+
+  // Local preview playback (only when the live is stopped).
   useEffect(() => {
     const el = audioRef.current
     if (!el) return
     setPosition(0)
     setDuration(0)
     setPlaying(false)
-    if (url) el.load()
-  }, [url])
+    if (!running && url) el.load()
+  }, [url, running])
 
-  if (!item || !url) return null
+  if (!item || (!url && !running)) return null
 
-  const toggle = () => {
+  // On air the position/duration come from the engine, so the bar matches the live.
+  const livePos = running ? Math.min(program?.position ?? 0, program?.cycle_duration ?? 0) : position
+  const liveDur = running ? program?.cycle_duration ?? 0 : duration
+
+  const toggle = async () => {
+    if (running) {
+      setBusy(true)
+      try {
+        await api.post(paused ? '/api/broadcast/resume' : '/api/broadcast/pause')
+        onChanged()
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     const el = audioRef.current
     if (!el) return
-    if (el.paused) {
-      void el.play().catch(() => {})
-    } else {
-      el.pause()
-    }
+    if (el.paused) void el.play().catch(() => {})
+    else el.pause()
   }
 
-  const seek = (value: number) => {
+  const seek = async (value: number) => {
+    if (running) {
+      setBusy(true)
+      try {
+        await api.post('/api/broadcast/seek', { position: value })
+        onChanged()
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     const el = audioRef.current
     if (!el || !Number.isFinite(el.duration)) return
     el.currentTime = Math.max(0, Math.min(value, el.duration))
@@ -67,37 +102,53 @@ export default function MusicBar({ items }: { items: EngineItem[] }) {
       <div className="music-bar-visual">
         {visual ? <img src={visual} alt="" /> : <IconMusic size={22} />}
       </div>
-      <button className="btn btn-sm btn-icon" onClick={toggle} title={playing ? 'Pause' : 'Lecture'}>
-        {playing ? '❚❚' : '▶'}
+      <button
+        className="btn btn-sm btn-icon"
+        onClick={() => void toggle()}
+        disabled={busy}
+        title={
+          running
+            ? paused
+              ? 'Reprendre le direct'
+              : 'Mettre le direct en pause'
+            : playing
+              ? 'Pause'
+              : 'Lecture'
+        }
+      >
+        {running ? (paused ? '▶' : '❚❚') : playing ? '❚❚' : '▶'}
       </button>
       <div className="music-bar-main">
         <div className="music-bar-title">
           <IconMusic size={13} /> {item.background_audio_title ?? item.title ?? 'Musique'}
+          {running && <span className="badge badge-live">EN DIRECT</span>}
         </div>
         <input
           className="music-bar-seek"
           type="range"
           min={0}
-          max={duration || 0}
+          max={liveDur || 0}
           step={0.1}
-          value={Math.min(position, duration || 0)}
-          onChange={(e) => seek(Number(e.target.value))}
-          title="Reculer / avancer dans la musique"
+          value={Math.min(livePos, liveDur || 0)}
+          onChange={(e) => void seek(Number(e.target.value))}
+          title="Reculer / avancer"
         />
       </div>
       <span className="text-sm muted-2 nowrap">
-        {formatDuration(position)} / {formatDuration(duration)}
+        {formatDuration(livePos)} / {formatDuration(liveDur)}
       </span>
-      <audio
-        ref={audioRef}
-        src={url}
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
-      />
+      {!running && (
+        <audio
+          ref={audioRef}
+          src={url ?? undefined}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+          onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        />
+      )}
     </div>
   )
 }

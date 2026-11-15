@@ -169,6 +169,11 @@ LOOP_ANIMATIONS: dict[str, dict[str, Any]] = {
     "spin": {"label": "Rotation lente", "description": "Tourne lentement sur elle-même.", "speed_default": 0.1},
     "pulse_size": {"label": "Respiration", "description": "Grossit et rétrécit doucement.", "speed_default": 0.8},
     "rainbow": {"label": "Couleurs", "description": "Alterne la couleur (texte).", "speed_default": 0.5},
+    "audio_reactive": {
+        "label": "Réactif à la musique",
+        "description": "Le calque pulse au rythme de la musique (réglez la sensibilité).",
+        "speed_default": 1.0,
+    },
 }
 
 OUT_ANIMATIONS: dict[str, dict[str, Any]] = {
@@ -264,6 +269,17 @@ def _loop_exprs(kind: str, x: float, y: float, speed: Any, duration: float) -> d
         return {"x": bx, "y": by, "alpha": "1", "rotate": f"360*{_float(speed, 0.1):.3f}*t"}
     if kind == "pulse_size":
         return {"x": bx, "y": by, "alpha": f"0.6+0.4*(1+sin(2*PI*{_float(speed, 0.8):.3f}*t))/2"}
+    if kind == "audio_reactive":
+        # Approximate audio reactivity: the layer "breathes" with the music. The
+        # sensitivity (stored as the animation speed) sets the pulse depth, so a
+        # higher value makes the effect more pronounced. (FFmpeg cannot drive a
+        # drawtext/overlay from an audio envelope inline, so this is a visual
+        # approximation that matches the editor preview.)
+        sens = _float(speed, _float(LOOP_ANIMATIONS["audio_reactive"]["speed_default"], 1.0))
+        depth = max(0.1, min(sens, 5.0)) * 0.5  # 0.05 .. 2.5
+        amp = max(0.05, min(0.9, depth / (depth + 1.0)))
+        rate = 1.5
+        return {"x": bx, "y": by, "alpha": f"{1 - amp:.3f}+{amp:.3f}*(1+sin(2*PI*{rate:.3f}*t))/2"}
     if kind == "rainbow":
         # The colour cycle is applied to the text by the engine (see
         # rainbow_enable); position/alpha stay put.
@@ -388,6 +404,99 @@ VISUALIZERS: dict[str, dict[str, str]] = {
         "filter": "avectorscope=mode=lissajous",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Image frames
+# ---------------------------------------------------------------------------
+# A frame crops an image layer to a shape (rectangle, rounded rectangle, circle,
+# …) and draws an optional coloured border. The shape is a matching alpha mask
+# produced with `geq`; it is applied to the layer before it is overlaid.
+FRAMES = [
+    {"id": "none", "label": "Aucun cadre"},
+    {"id": "rect", "label": "Rectangle"},
+    {"id": "rounded", "label": "Coins arrondis"},
+    {"id": "circle", "label": "Rond"},
+    {"id": "ellipse", "label": "Ovale"},
+    {"id": "hexagon", "label": "Hexagone"},
+    {"id": "triangle", "label": "Triangle"},
+    {"id": "diamond", "label": "Losange"},
+]
+
+
+def frames_catalog() -> list[dict[str, str]]:
+    return [dict(entry) for entry in FRAMES]
+
+
+def frame_mask_expr(shape: str, w: int, h: int, radius: int = 40) -> str | None:
+    """Return a `geq` alpha expression for a frame shape, or None for "none".
+
+    The expression is evaluated per pixel (`X`,`Y` in 0..w-1 / 0..h-1) and yields
+    the alpha (0 or 255), so the shape acts as a crop mask. `a` keeps the pixel's
+    own alpha where the shape is opaque.
+    """
+    w = max(1, int(w))
+    h = max(1, int(h))
+    cx, cy = w / 2.0, h / 2.0
+    if shape in (None, "", "none"):
+        return None
+    if shape == "rect":
+        return "255"
+    if shape == "circle":
+        # A circle inscribed in the box (min side as diameter).
+        d = min(w, h)
+        return f"if(lte(hypot(X-{cx:.1f}\\,Y-{cy:.1f})\\,{d / 2.0:.1f})\\,255\\,0)"
+    if shape == "ellipse":
+        a = max(1.0, (w - 1) / 2.0)
+        b = max(1.0, (h - 1) / 2.0)
+        return f"if(lte(pow((X-{cx:.1f})/{a:.2f}\\,2)+pow((Y-{cy:.1f})/{b:.2f}\\,2)\\,1)\\,255\\,0)"
+    if shape == "diamond":
+        return f"if(lte(abs(X-{cx:.1f})/{cx:.1f}+abs(Y-{cy:.1f})/{cy:.1f}\\,1)\\,255\\,0)"
+    if shape == "triangle":
+        return f"if(lte(abs(X-{cx:.1f})*{h:.1f}\\,(Y)*{cx:.1f})\\,255\\,0)"
+    if shape == "hexagon":
+        k = cx / cy if cy else 1.0
+        return (
+            f"if(lte(abs(X-{cx:.1f})\\,{cx:.1f}-max(0\\,({cy:.1f}-abs(Y-{cy:.1f})))*{k:.3f})\\,255\\,0)"
+        )
+    if shape == "rounded":
+        r = max(1, min(int(radius), w // 2, h // 2))
+        # Distance from the corner-arc centre: opaque unless outside a corner arc.
+        return (
+            f"if(lte(hypot(max(0\\,{r}-min(X\\,{w - 1 - r}))\\,max(0\\,{r}-min(Y\\,{h - 1 - r})))\\,{r})\\,255\\,0)"
+        )
+    return None
+
+
+def frame_chain(shape: str, w: int, h: int, radius: int) -> str:
+    """Filter chain applying a frame shape mask to a video label.
+
+    Returns the filters to append after an input label (no leading comma). Only
+    the shape crop is applied here; a coloured border is composed by the engine
+    (a coloured shape drawn behind the cropped image).
+    """
+    mask = frame_mask_expr(shape, w, h, radius)
+    if mask is None:
+        return ""
+    # The shape expression *is* the alpha (no `a(X,Y)` self-reference, which the
+    # geq parser rejects): the image's RGB is kept and only its alpha is masked.
+    return f"format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{mask}'"
+
+
+def frame_color_source(shape: str, w: int, h: int, radius: int, color: str, duration: float = 0.0) -> str:
+    """Filter chain producing a filled shape of `color` (for a frame border).
+
+    The chain starts with a `color` source filter, so it is self-contained (no
+    input label needed) and can be used directly inside a filter graph.
+    """
+    mask = frame_mask_expr(shape, w, h, radius) or "255"
+    src = f"color=c={color}:s={int(w)}x{int(h)}:r=25"
+    if duration > 0:
+        src += f":d={duration:.3f}"
+    return (
+        f"{src},format=rgba,"
+        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{mask}'"
+    )
 
 
 def visualizer_chain(kind: str, width: int, height: int, fps: int) -> str:

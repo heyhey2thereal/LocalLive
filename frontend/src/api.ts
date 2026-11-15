@@ -184,6 +184,13 @@ export interface SceneLayer {
   url?: string | null
   // visual effects
   blur?: number
+  // image frame: shape crop + optional coloured border
+  frame?: string
+  frame_radius?: number
+  frame_border?: number
+  frame_color?: string
+  // loop animation "reactive to music" sensitivity
+  audio_sensitivity?: number
 }
 
 export interface Scene {
@@ -234,6 +241,7 @@ export interface EngineItem {
 export interface EngineStatus {
   running: boolean
   starting: boolean
+  paused?: boolean
   pipeline: string
   playlist_id: number | null
   playlist_name: string
@@ -374,6 +382,7 @@ export interface Catalog {
   clock_formats?: CatalogOption[]
   clock_locales?: CatalogOption[]
   fonts?: { id: string; label: string }[]
+  frames?: { id: string; label: string }[]
   layer_types: LayerTypeInfo[]
   code_examples: { label: string; code: string }[]
   roles?: { id: string; label: string; description: string }[]

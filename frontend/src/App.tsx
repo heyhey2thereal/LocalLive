@@ -12,6 +12,7 @@ import PreviewProgram from './pages/PreviewProgram'
 import ProgramWindow from './pages/ProgramWindow'
 import Scenes from './pages/Scenes'
 import Scheduling from './pages/Scheduling'
+import Faq from './pages/Faq'
 import Settings from './pages/Settings'
 import SetupWizard from './pages/SetupWizard'
 import Streams from './pages/Streams'
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="schedule" element={<Scheduling />} />
         <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="faq" element={<Faq />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

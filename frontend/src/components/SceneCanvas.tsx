@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
 import { fontFamily, fontWeight } from '../lib/fonts'
+import { frameStyle } from '../lib/frames'
 import { formatClock } from './ProgramPreview'
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -320,7 +321,7 @@ export default function SceneCanvas({
 
   return (
     <div
-      className="scene-canvas editing"
+      className="scene-canvas"
       style={{ width: displayWidth, aspectRatio: `${width}/${height}`, background }}
       onClick={() => onSelect(null)}
     >
@@ -400,7 +401,10 @@ export default function SceneCanvas({
               onMouseDown={(e) => startDrag(e, i, 'move')}
               onClick={(e) => e.stopPropagation()}
             >
-              <span className="scene-layer-inner" style={{ filter: blur ? `blur(${blur * scale}px)` : undefined }}>
+              <span
+                className="scene-layer-inner"
+                style={{ filter: blur ? `blur(${blur * scale}px)` : undefined, ...(frameStyle(l, scale) ?? {}) }}
+              >
                 {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
                 {isMedia && !imgSrc && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{l.type}</span>}
                 {isReactive && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Réactif · {l.visualizer}</span>}

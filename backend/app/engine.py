@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -70,6 +71,7 @@ class EngineState:
     last_error: str = ""
     pipeline: str = ""
     pid: int | None = None
+    paused: bool = False
 
 
 def _ffmpeg_available() -> bool:
@@ -168,6 +170,36 @@ class PlaybackEngine:
             self._supervisor.join(timeout=3)
         return {"ok": True}
 
+    def pause(self) -> dict[str, Any]:
+        """Freeze the broadcast (SIGSTOP) without ending the process.
+
+        Used by the operator's sound console: pausing the music pauses the live,
+        resuming continues exactly where it stopped.
+        """
+        with self._lock:
+            proc = self._process
+            if not self._state.running or proc is None or proc.poll() is not None:
+                return {"ok": False, "error": "La diffusion n'est pas active"}
+            try:
+                proc.send_signal(signal.SIGSTOP)
+            except OSError as exc:
+                return {"ok": False, "error": str(exc)}
+            self._state.paused = True
+        return {"ok": True}
+
+    def resume(self) -> dict[str, Any]:
+        """Resume a broadcast frozen by `pause`."""
+        with self._lock:
+            proc = self._process
+            if proc is None or proc.poll() is not None:
+                return {"ok": False, "error": "La diffusion n'est pas active"}
+            try:
+                proc.send_signal(signal.SIGCONT)
+            except OSError as exc:
+                return {"ok": False, "error": str(exc)}
+            self._state.paused = False
+        return {"ok": True}
+
     def switch_playlist(self, playlist_id: int) -> dict[str, Any]:
         """Swap the live playlist without dropping the broadcast for long."""
         with self._lock:
@@ -236,6 +268,35 @@ class PlaybackEngine:
             label = "élément suivant" if step > 0 else "élément précédent"
             return {"ok": True, "message": f"Passage à l'{label}.", "index": target}
 
+    def reload_if_live(self, playlist_id: int) -> dict[str, Any]:
+        """Reload a playlist that is currently on air after it was edited.
+
+        Called when a playlist is changed (item added/removed/reordered, scene or
+        duration edited): if it is the one being broadcast, the engine re-resolves
+        its items and restarts the process so the change is heard on air at once.
+        A no-op for any other playlist, so the preview is never disturbed.
+        """
+        with self._lock:
+            if not self._state.running or self._state.playlist_id != playlist_id:
+                return {"ok": True, "reloaded": False}
+            items = self._resolve_items(playlist_id)
+            if not items:
+                return {"ok": False, "error": "La playlist est vide"}
+            # Keep playing the item that is on air when it still exists.
+            current = self._state.items[self._state.current_index] if self._state.items else None
+            rotated = items
+            if current:
+                idx = next((k for k, it in enumerate(items) if it["id"] == current["id"]), None)
+                if idx is not None:
+                    rotated = items[idx:] + items[:idx]
+            self._state.items = [_public_item(i) for i in rotated]
+            self._state.cycle_duration = sum(i["duration"] for i in rotated)
+            self._state.current_index = 0
+            self._state.position = 0.0
+            self._desired = {"playlist_id": playlist_id, "items": rotated}
+            self._terminate_process()  # supervisor restarts with the new items
+            return {"ok": True, "reloaded": True}
+
     def restart_current(self) -> dict[str, Any]:
         """Restart the item currently on air (from its beginning).
 
@@ -256,6 +317,38 @@ class PlaybackEngine:
                 self._desired = {"playlist_id": self._state.playlist_id, "items": rotated}
             self._terminate_process()  # supervisor restarts with the current item
             return {"ok": True}
+
+    def seek(self, position: float) -> dict[str, Any]:
+        """Jump the broadcast to `position` seconds into the current cycle.
+
+        The item that contains `position` is rotated to the front and the process
+        is restarted there, so the live resumes from the requested point (used by
+        the operator's sound console when scrubbing the music).
+        """
+        with self._lock:
+            if not self._state.running:
+                return {"ok": False, "error": "La diffusion n'est pas active"}
+            items = (self._desired or {}).get("items") or []
+            if not items:
+                return {"ok": False, "error": "Playlist vide"}
+            position = max(0.0, float(position))
+            acc = 0.0
+            target = 0
+            for k, it in enumerate(items):
+                acc += it["duration"] or 0
+                if position < acc:
+                    target = k
+                    break
+            else:
+                target = len(items) - 1
+            rotated = items[target:] + items[:target]
+            self._state.items = [_public_item(i) for i in rotated]
+            self._state.cycle_duration = sum(i["duration"] or 0 for i in rotated)
+            self._state.current_index = 0
+            self._state.position = 0.0
+            self._desired = {"playlist_id": self._state.playlist_id, "items": rotated}
+            self._terminate_process()  # supervisor restarts at the target item
+            return {"ok": True, "index": target}
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -285,6 +378,7 @@ class PlaybackEngine:
                 "errors": s.errors,
                 "last_error": s.last_error,
                 "pid": s.pid,
+                "paused": s.paused,
                 "ffmpeg": _ffmpeg_available(),
                 "log_tail": self._log_tail[-40:],
             }
@@ -826,7 +920,7 @@ class PlaybackEngine:
                 continue
             out_label = f"[sc{n}_{layer_index}]"
             applied = self._layer_overlay(
-                layer, filters, add_input, current, out_label, n, layer_index, dur, w, h, fps, font
+                layer, item, filters, add_input, current, out_label, n, layer_index, dur, w, h, fps, font
             )
             if applied:
                 current = out_label
@@ -834,7 +928,7 @@ class PlaybackEngine:
         filters.append(f"{current}format=yuv420p,fps={fps}[v{n}]")
 
     def _layer_overlay(
-        self, layer: dict[str, Any], filters: list[str], add_input,
+        self, layer: dict[str, Any], item: dict[str, Any], filters: list[str], add_input,
         src: str, out_label: str, n: int, layer_index: int,
         dur: float, w: int, h: int, fps: int, font: str | None,
     ) -> bool:
@@ -1005,8 +1099,20 @@ class PlaybackEngine:
             lw = int(layer.get("width") or w)
             lh = int(layer.get("height") or h)
             chain = fx.visualizer_chain(kind, lw, lh, fps)
-            ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
-            filters.append(f"[{ai}:a]aformat=channel_layouts=stereo,{chain}[viz{n}_{layer_index}]")
+            # The visualiser reacts to the item's audio: its background music when
+            # present, otherwise the source's own sound, otherwise silence (so the
+            # filter graph is always valid).
+            audio_src = item.get("background_audio_path")
+            if not audio_src and item.get("kind") == "video" and item.get("has_audio"):
+                audio_src = item.get("path")
+            if audio_src:
+                ai = add_input(["-t", f"{dur:.3f}", "-i", audio_src])
+            else:
+                ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
+            filters.append(
+                f"[{ai}:a]aformat=channel_layouts=stereo,atrim=duration={dur:.3f},"
+                f"asetpts=PTS-STARTPTS,{chain}[viz{n}_{layer_index}]"
+            )
             filters.append(f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
             return True
 
@@ -1028,6 +1134,29 @@ class PlaybackEngine:
             if blur > 0:
                 chain += f",gblur=sigma={blur:.1f}"
             chain += f",format=rgba,colorchannelmixer=aa={opacity:.3f}"
+            frame = str(layer.get("frame") or "none")
+            if frame and frame != "none":
+                radius = int(layer.get("frame_radius") or max(12, min(lw, lh) // 6))
+                border = int(layer.get("frame_border") or 0)
+                if border > 0 and lw > 2 * border and lh > 2 * border:
+                    # A coloured shape of the full size, with the image cropped to
+                    # the shape and inset by `border` px: the ring left visible is
+                    # the border. The colour shape is a self-contained source (a
+                    # `color` source filter), so no extra input is needed.
+                    bcolor = fx.hex_to_ffmpeg(str(layer.get("frame_color") or "#ffffff"))
+                    iw, ih = lw - 2 * border, lh - 2 * border
+                    filters.append(f"{fx.frame_color_source(frame, lw, lh, radius, bcolor, dur)}[frb{n}_{layer_index}]")
+                    filters.append(
+                        f"[{li}:v]scale={iw}:{ih},format=rgba,colorchannelmixer=aa={opacity:.3f},"
+                        f"{fx.frame_chain(frame, iw, ih, max(1, radius - border))}[lyr{n}_{layer_index}]"
+                    )
+                    filters.append(
+                        f"[frb{n}_{layer_index}][lyr{n}_{layer_index}]"
+                        f"overlay=x={border}:y={border}:shortest=1[lyrf{n}_{layer_index}]"
+                    )
+                    filters.append(f"{src}[lyrf{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
+                    return True
+                chain += "," + fx.frame_chain(frame, lw, lh, radius)
             filters.append(f"[{li}:v]{chain}[lyr{n}_{layer_index}]")
             filters.append(f"{src}[lyr{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
             return True

@@ -11,6 +11,7 @@ import {
   IconMedia,
   IconPlaylist,
   IconSettings,
+  IconHelp,
   IconSignal,
   IconStreams,
   IconUsers,
@@ -29,6 +30,7 @@ const NAV = [
   { to: '/media', label: 'nav.media', icon: IconMedia },
   { to: '/users', label: 'nav.users', icon: IconUsers, adminOnly: true },
   { to: '/settings', label: 'nav.settings', icon: IconSettings },
+  { to: '/faq', label: 'nav.faq', icon: IconHelp },
 ]
 
 const TITLES: Record<string, string> = {
@@ -41,6 +43,7 @@ const TITLES: Record<string, string> = {
   '/schedule': 'schedule.title',
   '/users': 'users.title',
   '/settings': 'settings.title',
+  '/faq': 'faq.title',
 }
 
 export default function Layout() {

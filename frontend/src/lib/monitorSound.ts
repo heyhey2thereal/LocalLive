@@ -121,6 +121,16 @@ function playUrl(url: string): void {
   applyGain()
 }
 
+/** Stop the current track (keeps the source selected so it can resume later). */
+function stopPlayback(): void {
+  currentUrl = null
+  if (element) {
+    element.pause()
+    element.removeAttribute('src')
+    element.load()
+  }
+}
+
 export function subscribeMonitorSound(fn: Listener): () => void {
   listeners.add(fn)
   fn(state())
@@ -166,11 +176,18 @@ export function requestMonitorSound(source: MonitorSource, item: EngineItem | nu
  * Keep `source` in sync with the current item. Called on every item change so the
  * element follows the playlist; a no-op for the monitor that is not selected.
  * Reloading only happens when the item's stream actually changes.
+ *
+ * When the new item has **no** audio (e.g. a scene whose music is not set to
+ * continue), the previous track must stop: otherwise the music would keep
+ * playing past the item it belongs to.
  */
 export function followMonitorSound(source: MonitorSource, item: EngineItem | null): void {
   if (currentSource !== source) return
   const url = monitorAudioUrl(item)
-  if (!url) return
+  if (!url) {
+    if (currentUrl) stopPlayback()
+    return
+  }
   lastVolume = monitorAudioVolume(item)
   playUrl(url)
   emit()

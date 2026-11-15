@@ -100,6 +100,37 @@ def stop(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, 
     return get_engine().stop()
 
 
+@router.post("/pause")
+def pause(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
+    """Freeze the broadcast (used by the operator's sound console)."""
+    result = get_engine().pause()
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Pause impossible"))
+    return result
+
+
+@router.post("/resume")
+def resume(user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
+    """Resume a broadcast frozen by /pause."""
+    result = get_engine().resume()
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Reprise impossible"))
+    return result
+
+
+class SeekPayload(BaseModel):
+    position: float = Field(ge=0)
+
+
+@router.post("/seek")
+def seek(payload: SeekPayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
+    """Jump the broadcast to a position in the current cycle (sound console)."""
+    result = get_engine().seek(payload.position)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Déplacement impossible"))
+    return result
+
+
 @router.post("/switch/{playlist_id}")
 def switch(playlist_id: int, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (playlist_id,)):

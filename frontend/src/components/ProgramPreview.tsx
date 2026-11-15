@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { EngineItem, Media, Scene, SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
 import { fontFamily, fontWeight } from '../lib/fonts'
+import { frameStyle } from '../lib/frames'
 import {
   followMonitorSound,
   isMonitorSoundSelected,
@@ -23,7 +24,7 @@ import {
   toggleMonitorSound,
   type MonitorSource,
 } from '../lib/monitorSound'
-import { IconMusic } from './icons'
+import { IconMusic, IconMusicMuted } from './icons'
 import { Spinner } from './ui'
 
 interface SceneLike {
@@ -213,7 +214,10 @@ export function SceneRender({
                 ...(anim ? anim.style : {}),
               }}
             >
-              <span className="scene-layer-inner" style={{ filter: blur ? `blur(${blur * scale}px)` : undefined }}>
+              <span
+                className="scene-layer-inner"
+                style={{ filter: blur ? `blur(${blur * scale}px)` : undefined, ...(frameStyle(l, scale) ?? {}) }}
+              >
                 {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
                 {isMedia && !imgSrc && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.type}</span>}
                 {!isMedia && !isBox && badge && (
@@ -493,7 +497,7 @@ export default function ProgramPreview({
           title={soundOn ? 'Couper le son du moniteur' : 'Activer le son du moniteur'}
           onClick={() => toggleMonitorSound(soundSource, item)}
         >
-          <IconMusic size={15} />
+          {soundOn ? <IconMusic size={15} /> : <IconMusicMuted size={15} />}
         </button>
       )}
       <button

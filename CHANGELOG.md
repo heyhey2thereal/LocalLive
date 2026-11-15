@@ -3,6 +3,31 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.15.0] — 2026-11-15
+
+### Ajouté
+- **Cadres d’image** : un calque image/logo peut recevoir un cadre (rectangle,
+  coins arrondis, rond, ovale, losange, triangle, hexagone) avec épaisseur et
+  couleur de bordure. Rendu par masque FFmpeg (geq), identique à l’éditeur.
+- **Animation de boucle « Réactif à la musique »** : le calque pulse au rythme de
+  la musique, avec un réglage de **sensibilité**.
+- **Police des comptes à rebours** : sélecteur de police, taille et couleur
+  disponibles aussi sur les calques Compte à rebours, Horloge et Bandeau.
+- **Console de son** : en bas de l’aperçu, elle **suit le direct** (position du
+  programme). On peut reculer/avancer et **mettre le direct en pause / le reprendre**.
+- **Onglet FAQ** : page d’aide avec de nombreuses questions/réponses, avec recherche.
+
+### Corrigé
+- **Visuels réactifs** : alimentés par du silence, ils ne bougeaient pas. Ils
+  réagissent maintenant à la musique de fond de l’élément (ou au son de la vidéo).
+- **Éléments hors cadre** : glissables en dehors du cadre mais **découpés
+  (croppés) au cadre** au lieu de dépasser — comme à l’antenne.
+- **Musique « ne pas continuer »** : un élément coché ainsi ne garde plus la piste.
+- **Moniteurs** : taille **fixe** (16:9), plus de redimensionnement selon l’image.
+- **Icône muet** : le bouton du son affiche une **icône barrée** quand coupé.
+- **Modifications de playlist** : si la playlist modifiée est **à l’antenne**, le
+  moteur la recharge aussitôt (l’aperçu n’est pas touché).
+
 ## [2.14.0] — 2026-11-15
 
 ### Ajouté

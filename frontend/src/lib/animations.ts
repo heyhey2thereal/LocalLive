@@ -49,6 +49,7 @@ const LOOP_KEYFRAMES: Record<string, string> = {
   spin: 'll-loop-spin',
   pulse_size: 'll-loop-breathe',
   rainbow: 'll-loop-rainbow',
+  audio_reactive: 'll-loop-audio',
 }
 
 const IN_DEFAULT = 0.5
@@ -62,6 +63,7 @@ const LOOP_DEFAULT: Record<string, number> = {
   spin: 0.1,
   pulse_size: 0.8,
   rainbow: 0.5,
+  audio_reactive: 1.0,
 }
 
 // Map the ffmpeg "speed" value to a CSS duration (rough but faithful preview).

@@ -13,6 +13,8 @@ from .. import permissions
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
+FRAMES = {f["id"] for f in fx.FRAMES}
+
 LAYER_TYPES = {
     "video", "image", "text", "logo", "overlay", "reactive", "code", "chat",
     "countdown", "web", "clock", "ticker",
@@ -65,6 +67,13 @@ class Layer(BaseModel):
     url: str | None = None
     # Gaussian blur radius (0 = none).
     blur: float = 0
+    # Image frame: shape crop + optional coloured border.
+    frame: str = "none"
+    frame_radius: int = Field(default=40, ge=0, le=400)
+    frame_border: int = Field(default=0, ge=0, le=80)
+    frame_color: str = "#ffffff"
+    # Loop animation "reactive to music": sensitivity (0.1 = calm, 3 = lively).
+    audio_sensitivity: float = Field(default=1.0, ge=0.1, le=5)
 
     @field_validator("anim_in")
     @classmethod
@@ -113,6 +122,13 @@ class Layer(BaseModel):
     def valid_visualizer(cls, v: str | None) -> str | None:
         if v is not None and v not in VISUALIZERS:
             raise ValueError(f"Visualiseur invalide : {v}")
+        return v
+
+    @field_validator("frame")
+    @classmethod
+    def valid_frame(cls, v: str) -> str:
+        if v not in FRAMES:
+            raise ValueError(f"Cadre invalide : {v}")
         return v
 
 

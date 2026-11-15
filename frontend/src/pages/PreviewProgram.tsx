@@ -475,8 +475,11 @@ export default function PreviewProgram() {
               <div
                 key={item.id}
                 className="row"
+                onClick={() => setPreviewIndex(i)}
+                title="Afficher cet élément dans l'aperçu"
                 style={{
                   padding: '6px 10px',
+                  cursor: 'pointer',
                   background: i === previewIndex ? 'var(--accent-soft)' : undefined,
                   border: `1px solid ${i === previewIndex ? 'var(--accent-line)' : 'transparent'}`,
                 }}
@@ -501,8 +504,10 @@ export default function PreviewProgram() {
         </div>
       )}
 
-      {/* Music of the preview playlist: current track, visual and a seekable bar. */}
-      {preview && preview.items.length > 0 && <MusicBar items={preview.items} />}
+      {/* Sound console: follows the program when on air, else the preview. */}
+      {((preview && preview.items.length > 0) || running) && (
+        <MusicBar items={preview?.items ?? []} program={program ?? null} onChanged={poll.refresh} />
+      )}
 
       {showHelp && (
         <Modal title="Raccourcis clavier" onClose={() => setShowHelp(false)}>

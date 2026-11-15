@@ -15,6 +15,7 @@ const fr: Dict = {
   'nav.schedule': 'Programmation',
   'nav.users': 'Utilisateurs',
   'nav.settings': 'Paramètres',
+  'nav.faq': 'FAQ',
   'nav.logout': 'Déconnexion',
   'common.save': 'Enregistrer',
   'common.cancel': 'Annuler',
@@ -48,6 +49,7 @@ const fr: Dict = {
   'schedule.title': 'Programmation',
   'users.title': 'Utilisateurs',
   'settings.title': 'Paramètres',
+  'faq.title': 'FAQ — Aide',
 }
 
 const en: Dict = {
@@ -62,6 +64,7 @@ const en: Dict = {
   'nav.schedule': 'Scheduling',
   'nav.users': 'Users',
   'nav.settings': 'Settings',
+  'nav.faq': 'FAQ',
   'nav.logout': 'Log out',
   'common.save': 'Save',
   'common.cancel': 'Cancel',
@@ -95,6 +98,7 @@ const en: Dict = {
   'schedule.title': 'Scheduling',
   'users.title': 'Users',
   'settings.title': 'Settings',
+  'faq.title': 'FAQ — Help',
 }
 
 const dictionaries: Record<string, Dict> = { fr, en }

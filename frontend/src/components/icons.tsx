@@ -236,6 +236,15 @@ export const IconMusic = ({ size = 16, className }: P) => (
   </svg>
 )
 
+// A speaker with a slash: "muted".
+export const IconMusicMuted = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M11 5 6 9H2v6h4l5 4z" />
+    <line x1="22" y1="9" x2="16" y2="15" />
+    <line x1="16" y1="9" x2="22" y2="15" />
+  </svg>
+)
+
 export const IconTransition = ({ size = 16, className }: P) => (
   <svg {...base(size)} className={className}>
     <rect x="2" y="6" width="9" height="12" rx="1.5" />
@@ -273,5 +282,13 @@ export const IconUsers = ({ size = 18, className }: P) => (
     <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
     <circle cx="9" cy="7" r="4" />
     <path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+  </svg>
+)
+
+export const IconHelp = ({ size = 18, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.2 9a2.8 2.8 0 1 1 3.6 2.7c-.8.3-1.3 1-1.3 1.9v.4" />
+    <line x1="11.5" y1="17" x2="11.5" y2="17" />
   </svg>
 )

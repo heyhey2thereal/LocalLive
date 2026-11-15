@@ -62,6 +62,11 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
     feed_url: type === 'ticker' ? '' : undefined,
     feed_limit: type === 'ticker' ? 8 : undefined,
     url: type === 'web' ? 'https://' : null,
+    frame: 'none',
+    frame_radius: 40,
+    frame_border: 0,
+    frame_color: '#ffffff',
+    audio_sensitivity: 1,
   }
 }
 
@@ -783,6 +788,60 @@ export default function Scenes() {
                   </div>
                 )}
 
+                {['image', 'logo'].includes(layer.type) && (
+                  <div className="field">
+                    <label>Cadre</label>
+                    <select
+                      className="select"
+                      value={layer.frame ?? 'none'}
+                      onChange={(e) => updateLayer(selectedLayer!, { frame: e.target.value })}
+                    >
+                      {(catalog?.frames ?? [{ id: 'none', label: 'Aucun cadre' }]).map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {['image', 'logo'].includes(layer.type) && (layer.frame ?? 'none') !== 'none' && (
+                  <>
+                    {layer.frame === 'rounded' && (
+                      <div className="field">
+                        <label>Arrondi ({layer.frame_radius ?? 40} px)</label>
+                        <input
+                          className="input"
+                          type="range"
+                          min={2}
+                          max={200}
+                          value={layer.frame_radius ?? 40}
+                          onChange={(e) => updateLayer(selectedLayer!, { frame_radius: Number(e.target.value) })}
+                        />
+                      </div>
+                    )}
+                    <div className="field">
+                      <label>Bordure ({layer.frame_border ?? 0} px)</label>
+                      <input
+                        className="input"
+                        type="range"
+                        min={0}
+                        max={40}
+                        value={layer.frame_border ?? 0}
+                        onChange={(e) => updateLayer(selectedLayer!, { frame_border: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Couleur de la bordure</label>
+                      <input
+                        className="input"
+                        type="color"
+                        value={layer.frame_color ?? '#ffffff'}
+                        onChange={(e) => updateLayer(selectedLayer!, { frame_color: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
+
                 <div className="field">
                   <label>Animation d'entrée (IN)</label>
                   <select
@@ -838,6 +897,22 @@ export default function Scenes() {
                       value={layer.animation_speed ?? ''}
                       onChange={(e) => updateLayer(selectedLayer!, { animation_speed: e.target.value ? Number(e.target.value) : null })}
                     />
+                  </div>
+                )}
+
+                {layer.anim_loop === 'audio_reactive' && (
+                  <div className="field">
+                    <label>Sensibilité à la musique ({layer.audio_sensitivity ?? 1})</label>
+                    <input
+                      className="input"
+                      type="range"
+                      min={0.1}
+                      max={5}
+                      step={0.1}
+                      value={layer.audio_sensitivity ?? 1}
+                      onChange={(e) => updateLayer(selectedLayer!, { audio_sensitivity: Number(e.target.value) })}
+                    />
+                    <span className="hint">Plus la valeur est haute, plus le calque réagit fort à la musique.</span>
                   </div>
                 )}
 
@@ -913,7 +988,7 @@ export default function Scenes() {
                     onChange={(e) => updateLayer(selectedLayer!, { blur: Number(e.target.value) })}
                   />
                 </div>
-                {(layer.type === 'text' || layer.type === 'overlay') && (
+                {['text', 'overlay', 'countdown', 'clock', 'ticker'].includes(layer.type) && (
                   <>
                     <div className="field">
                       <label>Police</label>

@@ -10,6 +10,17 @@ from .. import db, fx
 from ..deps import current_user, require, require_installed
 from .. import permissions
 
+
+def _reload_if_live(playlist_id: int) -> None:
+    """Ask the engine to reload this playlist when it is the one on air.
+
+    Editing a playlist that is being broadcast must take effect on air at once
+    (and never disturb the preview of another playlist).
+    """
+    from ..engine import get_engine
+
+    get_engine().reload_if_live(playlist_id)
+
 router = APIRouter(prefix="/api/playlists", tags=["playlists"])
 
 
@@ -193,6 +204,7 @@ def update_playlist(
             playlist_id,
         ),
     )
+    _reload_if_live(playlist_id)
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 
@@ -240,6 +252,7 @@ def add_item(
             1 if payload.background_audio_continue else 0,
         ),
     )
+    _reload_if_live(playlist_id)
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 
@@ -282,6 +295,7 @@ def update_item(
     if fields:
         values.append(item_id)
         db.execute(f"UPDATE playlist_items SET {', '.join(fields)} WHERE id = ?", tuple(values))
+    _reload_if_live(playlist_id)
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 
@@ -321,6 +335,7 @@ def duplicate_item(
                 int(row["background_audio_continue"] or 0),
             ),
         )
+    _reload_if_live(playlist_id)
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 
@@ -332,6 +347,7 @@ def delete_item(playlist_id: int, item_id: int, user: dict = Depends(require(per
         raise HTTPException(status_code=404, detail="Élément introuvable")
     db.execute("DELETE FROM playlist_items WHERE id = ?", (item_id,))
     _resequence(playlist_id)
+    _reload_if_live(playlist_id)
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 
@@ -358,6 +374,7 @@ def reorder(
                 "UPDATE playlist_items SET position = ? WHERE id = ? AND playlist_id = ?",
                 (index, item_id, playlist_id),
             )
+    _reload_if_live(playlist_id)
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,)))
 
 

@@ -518,3 +518,40 @@ def test_item_patch_continue_music(authed):
     authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"background_audio_continue": True})
     after = authed.get(f"/api/playlists/{pid}").json()["items"][0]
     assert after["background_audio_continue"] is True
+
+
+def test_reactive_visualizer_uses_audio():
+    from app import fx
+    chain = fx.visualizer_chain("bars", 160, 80, 25)
+    assert "showfreqs" in chain
+    assert chain.endswith("format=rgba")
+
+
+def test_frames_catalog_and_masks():
+    from app import fx
+    ids = {f["id"] for f in fx.frames_catalog()}
+    assert "rect" in ids and "rounded" in ids and "circle" in ids
+    for shape in ("rect", "rounded", "circle", "ellipse", "diamond", "triangle", "hexagon"):
+        assert fx.frame_mask_expr(shape, 100, 100) is not None
+    assert fx.frame_mask_expr("none", 100, 100) is None
+
+
+def test_audio_reactive_loop_expression():
+    from app import fx
+    motion = fx.layer_motion(10, 20, anim_loop="audio_reactive", speed=2.0)
+    assert motion["x"] == "10" and motion["y"] == "20"
+    assert "sin(" in motion["alpha"]
+
+
+def test_engine_seek_and_reload(installed):
+    from app.engine import PlaybackEngine
+    s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES(?, 1)", ("P",))
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s1, 0, 4.0))
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s2, 1, 4.0))
+    eng = PlaybackEngine()
+    # Not running: seek / reload are clean no-ops.
+    assert eng.seek(2.0)["ok"] is False
+    assert eng.reload_if_live(pid)["ok"] is True
+    assert eng.reload_if_live(pid)["reloaded"] is False
