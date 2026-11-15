@@ -3,6 +3,38 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.12.0] — 2026-11-15
+
+### Ajouté
+- **Son du moniteur** : un bouton haut-parleur sur le moniteur d'aperçu permet
+  d'écouter la bande son (musique de fond, vidéo, piste audio). Le son est joué
+  par un **élément audio unique hors interface** : il **continue en arrière-plan**
+  quand on change de page et ne s'arrête que si on le coupe explicitement.
+- **Compte à rebours pilotable** : quand un calque compte à rebours est détecté
+  sur l'élément à l'antenne ou dans l'aperçu, des commandes apparaissent sous le
+  moniteur — **relancer** le décompte et **ajouter du temps** (+10 s / +30 s /
+  +60 s). L'ajout de temps modifie la valeur de départ de la scène ; si l'élément
+  est à l'antenne il redémarre aussitôt pour afficher le nouveau temps.
+  `POST /api/broadcast/countdown` (`item_id`, `action` = `add` | `restart`,
+  `seconds`).
+
+### Corrigé
+- **Animation « Couleurs » (rainbow) dans l'interface** : le texte change
+  maintenant de couleur (l'ancien `filter: hue-rotate` ne modifiait pas un texte
+  blanc). Les teintes suivent celles du moteur (`fx.RAINBOW_COLORS`).
+- **Éléments hors cadre** : en édition, un calque peut sortir du cadre (le cadre
+  n'est qu'un repère). Déplacer ou redimensionner un élément au-delà des bords
+  est possible et l'élément reste attrapable. Les moniteurs continuent de
+  découper proprement ce qui part à l'antenne.
+- **Cadre au survol** : survoler un élément affiche son contour.
+- **Aperçu des animations** : survoler un élément joue ses animations **une
+  seule fois** (aperçu), et l'élément sélectionné ne les joue plus (il reste
+  immobile pour être édité).
+- **Prise d'antenne sans direct** : la flèche aperçu → programme ne **démarre
+  plus** le direct et n'affiche plus de message « il faut que le stream soit
+  allumé ». Si le direct est arrêté, la prise d'antenne ne fait rien (sans
+  erreur) ; `POST /api/broadcast/take` renvoie `{"ok": true, "switched": false}`.
+
 ## [2.11.0] — 2026-11-14
 
 ### Corrigé

@@ -112,24 +112,17 @@ export default function Scenes() {
     setSelectedLayer(null)
   }
 
-  // Pull a stored layer back inside the frame. Older scenes (or a resize done
-  // before clamping existed) could hold a box larger than the canvas, which made
-  // its handles unreachable. Normalising on open guarantees every layer can be
-  // grabbed again.
-  const fitLayer = (l: SceneLayer, w: number, h: number): SceneLayer => {
+  // Keep a stored layer's size sane (never below 8px, never bigger than the
+  // frame) but leave its position free: an element is allowed to sit outside the
+  // frame. Normalising on open guarantees a box is never zero-sized.
+  const normalizeLayer = (l: SceneLayer, w: number, h: number): SceneLayer => {
     const width = Math.max(8, Math.min(l.width ?? Math.round(w * 0.25), w))
     const height = Math.max(8, Math.min(l.height ?? Math.round((l.width ?? w * 0.25) * 9 / 16), h))
-    return {
-      ...l,
-      width,
-      height,
-      x: Math.max(0, Math.min(l.x, w - width)),
-      y: Math.max(0, Math.min(l.y, h - height)),
-    }
+    return { ...l, width, height }
   }
 
   const openScene = (s: Scene) =>
-    setEditing({ ...s, layers: s.layers.map((l) => fitLayer(l, s.width, s.height)) })
+    setEditing({ ...s, layers: s.layers.map((l) => normalizeLayer(l, s.width, s.height)) })
 
   const setLayers = (layers: SceneLayer[]) => {
     if (editing) setEditing({ ...editing, layers })

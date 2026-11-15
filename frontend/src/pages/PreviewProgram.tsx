@@ -10,7 +10,13 @@ import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } f
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
 import { formatDuration, formatUptime, Loading, Modal, useToast } from '../components/ui'
-import { IconArrowRight, IconPlay, IconStop } from '../components/icons'
+import { IconArrowRight, IconMusic, IconPlay, IconStop } from '../components/icons'
+import {
+  monitorAudioUrl,
+  monitorAudioVolume,
+  subscribeMonitorSound,
+  toggleMonitorSound,
+} from '../lib/monitorSound'
 
 // Map a transition id to a CSS animation class used to animate the monitors.
 function transitionClass(id: string): string {
@@ -21,6 +27,43 @@ function transitionClass(id: string): string {
   if (id === 'zoomin' || id === 'squeezeh' || id === 'squeezev') return 'tx-zoom'
   if (id === 'pixelize' || id === 'hblur') return 'tx-blur'
   return 'tx-fade'
+}
+
+// Controls shown under a monitor whose item carries a countdown layer: restart
+// it, or add time (the seconds are added to the scene's starting value, so the
+// engine draws a longer timer too).
+function CountdownControls({ item, onChanged }: { item: EngineItem; onChanged: () => void }) {
+  const { push } = useToast()
+  const [busy, setBusy] = useState(false)
+  const seconds = item.countdown?.seconds ?? 60
+  const send = async (action: 'restart' | 'add', amount = 0) => {
+    setBusy(true)
+    try {
+      await api.post('/api/broadcast/countdown', { item_id: item.id, action, seconds: amount })
+      push({
+        kind: 'ok',
+        title: action === 'restart' ? 'Compte à rebours relancé' : `+${amount} s ajoutées`,
+      })
+      onChanged()
+    } catch (err: any) {
+      push({ kind: 'err', title: 'Compte à rebours impossible', message: err?.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="countdown-controls">
+      <span className="text-sm muted-2 nowrap">Compte à rebours · {seconds}s</span>
+      <button className="btn btn-sm" disabled={busy} onClick={() => void send('restart')} title="Relancer le décompte">
+        ↻ Relancer
+      </button>
+      {[10, 30, 60].map((amount) => (
+        <button key={amount} className="btn btn-sm" disabled={busy} onClick={() => void send('add', amount)}>
+          +{amount}s
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export default function PreviewProgram() {
@@ -81,6 +124,15 @@ export default function PreviewProgram() {
   const target = selectedId || preview?.playlist_id || null
   const running = Boolean(program?.running)
 
+  // Monitor sound of the preview: a single shared audio element (monitorSound)
+  // so it keeps playing while the operator moves between pages.
+  const [previewSoundOn, setPreviewSoundOn] = useState(false)
+  useEffect(
+    () => subscribeMonitorSound((st) => setPreviewSoundOn(st.source === 'preview')),
+    [],
+  )
+  const previewAudio = monitorAudioUrl(previewItem)
+
   // Seconds the *current program item* has been playing: total position minus
   // the durations of the items already passed. Used by the countdown layer so
   // the monitor matches the actual on-air timer instead of restarting on load.
@@ -114,24 +166,25 @@ export default function PreviewProgram() {
 
   // Take the preview to air: swap preview/program WITHOUT starting the live.
   // The broadcast is started only by the explicit "Démarrer le direct" button.
+  // When the live is stopped the backend does nothing (silent no-op) and we
+  // simply leave the monitors as they are.
   const swap = async () => {
     if (!target) {
       push({ kind: 'err', title: 'Choisissez d’abord une playlist dans l’aperçu' })
       return
     }
-    if (!running) {
-      push({
-        kind: 'info',
-        title: 'Le direct est arrêté',
-        message: 'Démarrez le direct pour prendre l’antenne.',
-      })
-      return
-    }
     setBusy(true)
     const previousProgram = program?.playlist_id ?? null
-    playTransition()
     try {
-      await api.post('/api/broadcast/take', { playlist_id: target })
+      const res = await api.post<{ ok: boolean; switched?: boolean }>('/api/broadcast/take', {
+        playlist_id: target,
+      })
+      if (res.switched === false) {
+        // Live stopped: nothing to switch, no message (the operator was not
+        // asked to start the stream).
+        return
+      }
+      playTransition()
       push({ kind: 'ok', title: 'Prise d’antenne effectuée' })
       setSelectedId(previousProgram ?? '')
       poll.refresh()
@@ -231,7 +284,15 @@ export default function PreviewProgram() {
             <span className="badge badge-info">APERÇU</span>
             <span className="text-sm muted-2 truncate">{preview?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={previewItem} emptyLabel="Aucune playlist dans l'aperçu" width={520} reloadKey={reloadKey} animate />
+          <ProgramPreview
+            item={previewItem}
+            emptyLabel="Aucune playlist dans l'aperçu"
+            width={520}
+            soundSource="preview"
+            reloadKey={reloadKey}
+            animate
+          />
+          {previewItem?.countdown && <CountdownControls item={previewItem} onChanged={poll.refresh} />}
           <div className="switcher-monitor-foot">
             <select
               className="select grow"
@@ -245,6 +306,16 @@ export default function PreviewProgram() {
                 </option>
               ))}
             </select>
+            <button
+              className={`btn btn-sm ${previewSoundOn ? 'btn-primary' : ''}`}
+              disabled={!previewAudio}
+              title={previewSoundOn ? 'Couper le son du moniteur' : 'Écouter le son du moniteur'}
+              onClick={() =>
+                toggleMonitorSound(previewAudio, monitorAudioVolume(previewItem), 'preview')
+              }
+            >
+              <IconMusic size={15} /> {previewSoundOn ? 'Son' : 'Muet'}
+            </button>
           </div>
         </div>
 
@@ -264,7 +335,19 @@ export default function PreviewProgram() {
             </span>
             <span className="text-sm muted-2 truncate">{program?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} reloadKey={reloadKey} sound animate elapsed={running ? programElapsed : null} />
+          <ProgramPreview
+            item={programItem}
+            emptyLabel="La diffusion est à l'arrêt"
+            width={520}
+            soundSource="program"
+            sound
+            reloadKey={reloadKey}
+            animate
+            elapsed={running ? programElapsed : null}
+          />
+          {running && programItem?.countdown && (
+            <CountdownControls item={programItem} onChanged={poll.refresh} />
+          )}
           <div className="switcher-monitor-foot">
             <span className="text-sm muted-2">
               {running && program

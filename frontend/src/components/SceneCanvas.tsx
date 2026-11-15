@@ -7,7 +7,11 @@
 //     Shift disables the smart guides (free movement);
 //   * Alt locks the aspect ratio while resizing;
 //   * arrow keys nudge the selected layer (1px, or 10px with Shift);
-//   * layers are always clamped inside the frame, so an image can never overflow;
+//   * layers may leave the frame: an element can be dragged (or resized) past
+//     the canvas edges, which is shown with `overflow: visible` while editing.
+//     The frame is only a guide, not a hard clip, so an element can sit partly
+//     (or fully) outside it;
+//   * hovering a layer shows its outline and plays its animations once;
 //   * text layers scale their font with the box; images use the cached
 //     medium-resolution preview (fast to load, sharp enough to enlarge).
 
@@ -71,6 +75,9 @@ export default function SceneCanvas({
   const scale = displayWidth / width
   const layerRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const [guides, setGuides] = useState<Guides>({ v: [], h: [] })
+  // Layer currently under the pointer: it gets an outline and plays its
+  // animations once (a quick preview of the motion).
+  const [hovered, setHovered] = useState<number | null>(null)
   const drag = useRef<{
     index: number
     handle: Handle | 'move'
@@ -90,50 +97,25 @@ export default function SceneCanvas({
     [layers, onChange],
   )
 
-  // Clamp a layer so it always stays inside the frame.
-  const clamp = (l: { x: number; y: number; width?: number | null; height?: number | null }) => {
-    const w = l.width ?? 0
-    const h = l.height ?? 0
-    return {
-      x: Math.max(0, Math.min(l.x, Math.max(0, width - w))),
-      y: Math.max(0, Math.min(l.y, Math.max(0, height - h))),
-    }
-  }
+  // Keep a moved layer's position free (it may leave the frame); round to whole
+  // units. Only the size is bounded elsewhere, never the position.
+  const clampMove = (l: { x: number; y: number; width?: number | null; height?: number | null }) => ({
+    x: Math.round(l.x),
+    y: Math.round(l.y),
+  })
 
-  // Clamp a resized box to the frame while keeping the edge the user is dragging
-  // where they put it. Without this, dragging a handle past the frame let the box
-  // grow without bound: it overflowed the canvas and its handles became
-  // unreachable, so the image could no longer be grabbed.
+  // Bound a resized box: never smaller than MIN_SIZE and never larger than the
+  // frame. The position is left free, so a box may be dragged or resized partly
+  // outside the frame; the edge being dragged stays where the user puts it.
   const clampResize = (
     x: number,
     y: number,
     w: number,
     h: number,
-    hnd: Handle,
+    _hnd: Handle,
   ): { x: number; y: number; width: number; height: number } => {
     w = Math.max(MIN_SIZE, Math.min(w, width))
     h = Math.max(MIN_SIZE, Math.min(h, height))
-    if (hnd.includes('w')) {
-      // Right edge stays put; pull the left edge back inside the frame.
-      const right = Math.min(x + w, width)
-      x = Math.max(0, Math.min(x, right - MIN_SIZE))
-      w = right - x
-    } else if (hnd.includes('e')) {
-      x = Math.max(0, Math.min(x, width - MIN_SIZE))
-      w = Math.max(MIN_SIZE, Math.min(w, width - x))
-    } else {
-      x = Math.max(0, Math.min(x, Math.max(0, width - w)))
-    }
-    if (hnd.includes('n')) {
-      const bottom = Math.min(y + h, height)
-      y = Math.max(0, Math.min(y, bottom - MIN_SIZE))
-      h = bottom - y
-    } else if (hnd.includes('s')) {
-      y = Math.max(0, Math.min(y, height - MIN_SIZE))
-      h = Math.max(MIN_SIZE, Math.min(h, height - y))
-    } else {
-      y = Math.max(0, Math.min(y, Math.max(0, height - h)))
-    }
     return { x, y, width: w, height: h }
   }
 
@@ -219,7 +201,7 @@ export default function SceneCanvas({
       else if (e.key === 'ArrowDown') dy = step
       else return
       e.preventDefault()
-      patchLayer(selected, clamp({ x: layer.x + dx, y: layer.y + dy, width: layer.width, height: layer.height }))
+      patchLayer(selected, clampMove({ x: layer.x + dx, y: layer.y + dy, width: layer.width, height: layer.height }))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -256,7 +238,7 @@ export default function SceneCanvas({
           ny = res.y
           g = res.guides
         }
-        return { patch: clamp({ x: nx, y: ny, width: w, height: h }), guides: g }
+        return { patch: clampMove({ x: nx, y: ny, width: w, height: h }), guides: g }
       }
       let x = d.orig.x
       let y = d.orig.y
@@ -329,7 +311,7 @@ export default function SceneCanvas({
 
   return (
     <div
-      className="scene-canvas"
+      className="scene-canvas editing"
       style={{ width: displayWidth, aspectRatio: `${width}/${height}`, background }}
       onClick={() => onSelect(null)}
     >
@@ -366,18 +348,26 @@ export default function SceneCanvas({
             const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
             lh = Math.round(lw * ratio)
           }
-          // Editor: preview every animation on a loop so the motion is always
-          // visible (IN/OUT are one-shot on air and would leave the layer
-          // hidden once the OUT finished).
-          const anim = layerAnimation(l, 0, width * scale, true)
+          // The selected layer stays static (so it can be moved/edited); every
+          // other layer previews its motion — looping by default, and once while
+          // the pointer is over it.
+          const isSelected = selected === i
+          const isHovered = hovered === i
+          const anim = isSelected ? null : layerAnimation(l, 0, width * scale, true, isHovered)
+          const showAnim = anim && !isSelected
+          // Remount the layer while it is hovered so the one-shot animation
+          // starts from the beginning on every hover (a CSS animation does not
+          // restart when only its iteration count changes). Layers without an
+          // animation keep a stable key, so media never flickers.
+          const key = showAnim && isHovered ? `${i}-hover` : i
           return (
             <div
-              key={i}
+              key={key}
               ref={(el) => {
                 if (el) layerRefs.current.set(i, el)
                 else layerRefs.current.delete(i)
               }}
-              className={`scene-layer ${selected === i ? 'selected' : ''} ${anim ? anim.className : ''}`}
+              className={`scene-layer ${isSelected ? 'selected' : ''} ${isHovered && !isSelected ? 'hovered' : ''} ${showAnim ? anim.className : ''}`}
               style={{
                 left: l.x * scale,
                 top: l.y * scale,
@@ -392,10 +382,12 @@ export default function SceneCanvas({
                 padding: isBox ? '4px 8px' : 0,
                 // When an animation drives `transform`, it also owns the rotation
                 // (via --ll-rot), so we must not set it inline.
-                transform: !anim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
+                transform: !showAnim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
                 zIndex: (l.z ?? 0) + 1,
-                ...(anim ? anim.style : {}),
+                ...(showAnim ? anim.style : {}),
               }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
               onMouseDown={(e) => startDrag(e, i, 'move')}
               onClick={(e) => e.stopPropagation()}
             >

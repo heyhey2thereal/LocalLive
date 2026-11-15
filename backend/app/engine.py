@@ -213,6 +213,27 @@ class PlaybackEngine:
             label = "élément suivant" if step > 0 else "élément précédent"
             return {"ok": True, "message": f"Passage à l'{label}.", "index": target}
 
+    def restart_current(self) -> dict[str, Any]:
+        """Restart the item currently on air (from its beginning).
+
+        Used by the countdown controls: restarting the scene that holds the
+        countdown makes it start over. The item is rotated to the front so the
+        process resumes exactly there instead of from the playlist start.
+        """
+        with self._lock:
+            if not self._state.running:
+                return {"ok": False, "error": "La diffusion n'est pas active"}
+            items = (self._desired or {}).get("items") or []
+            idx = self._state.current_index
+            if items and 0 <= idx < len(items):
+                rotated = items[idx:] + items[:idx]
+                self._state.items = [_public_item(i) for i in rotated]
+                self._state.cycle_duration = sum(i["duration"] for i in rotated)
+                self._state.current_index = 0
+                self._desired = {"playlist_id": self._state.playlist_id, "items": rotated}
+            self._terminate_process()  # supervisor restarts with the current item
+            return {"ok": True}
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             s = self._state
@@ -983,6 +1004,28 @@ def _mask(value: str) -> str:
     return mask_secret(value)
 
 
+def _countdown_descriptor(item: dict[str, Any]) -> dict[str, Any] | None:
+    """First countdown layer of a scene item, or None.
+
+    Lets the interface show countdown controls (start, add time) for whatever is
+    in the preview or on air, without re-fetching the whole scene.
+    """
+    if not item.get("scene_id"):
+        return None
+    try:
+        layers = json.loads(item.get("scene_layers") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    for idx, layer in enumerate(layers):
+        if isinstance(layer, dict) and layer.get("type") == "countdown":
+            return {
+                "layer_index": idx,
+                "seconds": int(layer.get("countdown_seconds") or 60),
+                "mode": layer.get("countdown_mode") or "down",
+            }
+    return None
+
+
 def _public_item(item: dict[str, Any]) -> dict[str, Any]:
     bg_id = item.get("background_audio_id")
     return {
@@ -999,6 +1042,7 @@ def _public_item(item: dict[str, Any]) -> dict[str, Any]:
         "background_audio_id": bg_id,
         "background_audio_url": f"/api/media/{bg_id}/stream" if bg_id else None,
         "background_volume": float(item.get("background_volume") or 0),
+        "countdown": _countdown_descriptor(item),
         "exists": bool(item.get("exists")),
     }
 

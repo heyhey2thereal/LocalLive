@@ -435,6 +435,12 @@ video {
 .switcher-monitor-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px;
 }
+/* Countdown controls under a monitor (restart / add time). */
+.countdown-controls {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 8px; padding: 8px 10px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
+}
 .switcher-arrow { display: flex; align-items: center; justify-content: center; }
 .switcher-arrow-btn {
   width: 52px; height: 52px; border-radius: 50%; cursor: pointer;
@@ -856,12 +862,16 @@ video {
 .scene-layers-list { max-height: 460px; overflow-y: auto; }
 .scene-canvas-wrap {
   background: #05070a; border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 14px; display: grid; place-items: center; overflow: hidden;
+  padding: 14px; display: grid; place-items: center; overflow: visible;
 }
 @media (max-width: 860px) {
   .scene-editor { grid-template-columns: 1fr; }
 }
 .scene-canvas { position: relative; background: #000; overflow: hidden; }
+/* While editing, the frame is only a guide: elements may be dragged (or
+   resized) partly or fully outside it, so the canvas must not clip them. The
+   monitors keep `overflow: hidden` so what goes on air stays inside the frame. */
+.scene-canvas.editing { overflow: visible; }
 .scene-thumb-badge {
   position: absolute; bottom: 6px; right: 8px; z-index: 3;
   background: rgba(11, 13, 18, 0.75); color: var(--text-2);
@@ -873,6 +883,8 @@ video {
   overflow: hidden; font-weight: 600;
 }
 .scene-layer.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* Hovering an element outlines it so the operator can see its bounds. */
+.scene-layer.hovered { border-color: var(--accent-line); }
 /* The layer box is authored by the operator, so an image fills it (stretch),
    exactly like the engine's scale filter: stretching an edge stretches the
    image on that side. */
@@ -959,9 +971,15 @@ video {
   0%, 100% { transform: rotate(var(--ll-rot, 0deg)) scale(1); }
   50% { transform: rotate(var(--ll-rot, 0deg)) scale(1.08); }
 }
+/* Cycle the text colour itself (filter: hue-rotate does nothing to a white
+   text). The stops mirror fx.RAINBOW_COLORS so the monitor matches the engine. */
 @keyframes ll-loop-rainbow {
-  0% { filter: hue-rotate(0deg); }
-  100% { filter: hue-rotate(360deg); }
+  0%, 100% { color: #ff0040; }
+  17% { color: #ff8a00; }
+  33% { color: #ffe600; }
+  50% { color: #33cc33; }
+  67% { color: #00b3ff; }
+  83% { color: #8a2be2; }
 }
 
 

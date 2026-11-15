@@ -88,7 +88,7 @@ export default function ProgramWindow() {
         </div>
       )}
       <div className="program-window-stage">
-        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} sound={soundEnabled} animate elapsed={view === 'program' ? programElapsed : null} />
+        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} soundSource="window" sound={soundEnabled} animate elapsed={view === 'program' ? programElapsed : null} />
       </div>
     </div>
   )

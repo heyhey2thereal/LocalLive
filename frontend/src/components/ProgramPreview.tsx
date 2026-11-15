@@ -13,6 +13,16 @@ import { useEffect, useRef, useState } from 'react'
 import type { EngineItem, Media, Scene, SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
 import { fontFamily, fontWeight } from '../lib/fonts'
+import {
+  isMonitorSoundActive,
+  monitorAudioUrl,
+  monitorAudioVolume,
+  playMonitorSound,
+  subscribeMonitorSound,
+  syncMonitorSound,
+  toggleMonitorSound,
+} from '../lib/monitorSound'
+import { IconMusic } from './icons'
 
 interface SceneLike {
   width: number
@@ -292,6 +302,7 @@ function MediaRender({
   item,
   width,
   sound,
+  soundSource,
   reloadKey,
   animate,
   elapsed,
@@ -299,6 +310,7 @@ function MediaRender({
   item: EngineItem
   width: number
   sound: boolean
+  soundSource: string
   reloadKey?: string | number
   animate: boolean
   elapsed?: number | null
@@ -331,81 +343,48 @@ function MediaRender({
     // reflects edits without a manual refresh.
   }, [item.scene_id, item.media_id, reloadKey])
 
-  // Background music mixed under the item: played (at its volume) only when the
-  // monitor has sound on, so full screen lets the operator hear it too.
-  const backgroundAudio =
-    sound && item.background_audio_url ? (
-      <audio
-        src={item.background_audio_url}
-        autoPlay
-        loop
-        ref={(el) => {
-          if (el) el.volume = Math.min(Math.max(item.background_volume ?? 0.15, 0), 1)
-        }}
-      />
-    ) : null
+  // The monitor's sound is played by the shared element (monitorSound.ts), not
+  // by an <audio> inside this component, so it keeps playing when the operator
+  // leaves the page. `sound` only turns it on; turning it off is explicit (the
+  // speaker button) so navigating away does not cut it.
+  const audioUrl = monitorAudioUrl(item)
+  const audioVolume = monitorAudioVolume(item)
+  useEffect(() => {
+    if (!sound) return
+    syncMonitorSound(audioUrl, audioVolume, soundSource)
+  }, [sound, audioUrl, audioVolume, soundSource])
 
   if (item.scene_id) {
     if (!ready || !scene) return <div className="stage-empty">Chargement…</div>
     return (
-      <>
-        {backgroundAudio}
-        <FitScene
-          scene={scene}
-          media={media}
-          preferThumb={width < 480}
-          animate={animate}
-          layerDuration={item.duration}
-          elapsed={elapsed}
-        />
-      </>
+      <FitScene
+        scene={scene}
+        media={media}
+        preferThumb={width < 480}
+        animate={animate}
+        layerDuration={item.duration}
+        elapsed={elapsed}
+      />
     )
   }
 
   if (item.kind === 'image' && item.stream_url) {
-    return (
-      <>
-        {backgroundAudio}
-        <img className="fit-media" src={item.stream_url} alt={item.title} />
-      </>
-    )
+    return <img className="fit-media" src={item.stream_url} alt={item.title} />
   }
   if (item.kind === 'video' && item.stream_url) {
+    // Always muted here: the sound comes from the shared element above.
     return (
-      <>
-        {backgroundAudio}
-        <video
-          className="fit-media"
-          src={item.stream_url}
-          muted={!sound}
-          autoPlay
-          loop
-          playsInline
-          controls={sound}
-        />
-      </>
+      <video className="fit-media" src={item.stream_url} muted autoPlay loop playsInline />
     )
   }
   if (item.kind === 'audio' && item.stream_url) {
-    // An audio-only item has no picture: play the sound itself (so it is audible
-    // in full screen), keeping a short label on screen.
+    // An audio-only item has no picture: keep a short label on screen; the sound
+    // is played by the shared element.
     return (
-      <>
-        <audio src={item.stream_url} autoPlay loop muted={!sound} controls={sound} />
-        <div className="stage-empty">
-          <span style={{ fontWeight: 600 }}>{item.title}</span>
-          <span className="text-sm muted-2">Piste audio</span>
-        </div>
-      </>
-    )
-  }
-  if (item.scene_id) {
-    // Scene items can also carry background music.
-    return (
-      <>
-        {backgroundAudio}
-        <div className="stage-empty">—</div>
-      </>
+      <div className="stage-empty">
+        <span style={{ fontWeight: 600 }}>{item.title}</span>
+        <span className="text-sm muted-2">Piste audio</span>
+      </div>
     )
   }
   return <div className="stage-empty">—</div>
@@ -416,6 +395,8 @@ interface Props {
   emptyLabel: string
   width: number
   sound?: boolean
+  /** Identity of this monitor for the shared sound element (default "monitor"). */
+  soundSource?: string
   reloadKey?: string | number
   /** Play the scene layers' IN/LOOP/OUT animations (monitors). */
   animate?: boolean
@@ -428,15 +409,27 @@ export default function ProgramPreview({
   emptyLabel,
   width,
   sound = false,
+  soundSource = 'monitor',
   reloadKey,
   animate = false,
   elapsed = null,
 }: Props) {
   const tileRef = useRef<HTMLDivElement>(null)
-  // Enabling sound is allowed once the user has interacted; the full-screen
-  // button counts as that interaction, so the audio plays right away.
-  const [soundOn, setSoundOn] = useState(sound)
-  useEffect(() => setSoundOn(sound), [sound])
+  // Whether this monitor owns the shared sound element. It is the module state
+  // (not a local flag) so the sound survives page changes.
+  const [soundOn, setSoundOn] = useState(false)
+  useEffect(() => subscribeMonitorSound((st) => setSoundOn(st.source === soundSource)), [soundSource])
+  // `sound` asks to start this monitor's sound on mount (the program monitor,
+  // the detached window). Idempotent: never turns an already-on sound off, so a
+  // remount (page change) does not interrupt it.
+  useEffect(() => {
+    if (!sound) return
+    const url = monitorAudioUrl(item)
+    if (url && !isMonitorSoundActive(soundSource)) {
+      playMonitorSound(url, monitorAudioVolume(item), soundSource)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sound, soundSource])
 
   if (!item) {
     return (
@@ -447,14 +440,35 @@ export default function ProgramPreview({
       </div>
     )
   }
+  const audioUrl = monitorAudioUrl(item)
   return (
     <div className="program-tile" ref={tileRef}>
-      <MediaRender item={item} width={width} sound={soundOn} reloadKey={reloadKey} animate={animate} elapsed={elapsed} />
+      <MediaRender
+        item={item}
+        width={width}
+        sound={soundOn}
+        soundSource={soundSource}
+        reloadKey={reloadKey}
+        animate={animate}
+        elapsed={elapsed}
+      />
+      {audioUrl && (
+        <button
+          className="program-fullscreen"
+          style={{ right: 44 }}
+          title={soundOn ? 'Couper le son du moniteur' : 'Activer le son du moniteur'}
+          onClick={() => toggleMonitorSound(audioUrl, monitorAudioVolume(item), soundSource)}
+        >
+          <IconMusic size={15} />
+        </button>
+      )}
       <button
         className="program-fullscreen"
         title="Plein écran (avec son)"
         onClick={() => {
-          setSoundOn(true)
+          if (!soundOn && audioUrl) {
+            toggleMonitorSound(audioUrl, monitorAudioVolume(item), soundSource)
+          }
           if (document.fullscreenElement) void document.exitFullscreen()
           else void tileRef.current?.requestFullscreen?.()
         }}

@@ -204,6 +204,12 @@ export interface Schedule {
   enabled: boolean
 }
 
+export interface CountdownInfo {
+  layer_index: number
+  seconds: number
+  mode: 'up' | 'down'
+}
+
 export interface EngineItem {
   id: number
   media_id: number | null
@@ -216,6 +222,8 @@ export interface EngineItem {
   background_audio_id?: number | null
   background_audio_url?: string | null
   background_volume?: number
+  /** First countdown layer of a scene item, when it has one. */
+  countdown?: CountdownInfo | null
   exists: boolean
 }
 

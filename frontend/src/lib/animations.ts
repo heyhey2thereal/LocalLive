@@ -100,12 +100,16 @@ function loopDuration(kind: string, speed: number | null | undefined): number {
  * @param preview       editor mode: play every animation on a loop so the
  *   operator always sees the motion (IN/OUT are one-shot on air, which would
  *   otherwise leave the layer invisible once the OUT finished).
+ * @param once          one-shot preview (hover): each animation plays exactly
+ *   once and the layer then rests in its natural state, so hovering an element
+ *   shows a single pass of the motion instead of a loop.
  */
 export function layerAnimation(
   layer: SceneLayer,
   layerDuration = 0,
   canvasWidth = 0,
   preview = false,
+  once = false,
 ): LayerAnimation | null {
   const animIn = layer.anim_in && layer.anim_in !== 'none' ? layer.anim_in : null
   const animLoop = layer.anim_loop && layer.anim_loop !== 'none' ? layer.anim_loop : null
@@ -115,22 +119,27 @@ export function layerAnimation(
   const speed = layer.animation_speed ?? null
   const animations: string[] = []
 
-  // In preview mode the animations loop so the operator always sees the motion.
-  // A one-shot IN would otherwise leave the layer hidden once the OUT finished.
-  // When both IN and OUT are set, keep the IN (loop) and drop the OUT so the two
-  // do not fight over the same property.
-  const showOut = !(preview && animIn)
-
   if (animIn && IN_KEYFRAMES[animIn]) {
-    animations.push(`${IN_KEYFRAMES[animIn]} ${speed ?? IN_DEFAULT}s ease ${preview ? 'infinite' : 'both'}`)
+    // On air the IN ends at its natural state ("both"); in a one-shot hover
+    // preview it must NOT keep the end state ("none"), otherwise an OUT/LOOP
+    // sharing the property would never show.
+    const fill = once ? 'none' : preview ? 'infinite' : 'both'
+    animations.push(`${IN_KEYFRAMES[animIn]} ${speed ?? IN_DEFAULT}s ease ${fill}`)
   }
   if (animLoop && LOOP_KEYFRAMES[animLoop]) {
-    animations.push(`${LOOP_KEYFRAMES[animLoop]} ${loopDuration(animLoop, speed)}s linear infinite`)
+    animations.push(
+      `${LOOP_KEYFRAMES[animLoop]} ${loopDuration(animLoop, speed)}s linear ${once ? '1' : 'infinite'}`,
+    )
   }
-  if (showOut && animOut && OUT_KEYFRAMES[animOut]) {
+  if (animOut && OUT_KEYFRAMES[animOut]) {
     const dur = speed ?? OUT_DEFAULT
-    if (preview) {
-      animations.push(`${OUT_KEYFRAMES[animOut]} ${dur}s ease infinite`)
+    if (once) {
+      // One pass, then back to the natural state (no fill).
+      animations.push(`${OUT_KEYFRAMES[animOut]} ${dur}s ease none`)
+    } else if (preview) {
+      // In the editor loop every animation, but keep the IN and drop the OUT
+      // when both are set so the two do not fight over the same property.
+      if (!animIn) animations.push(`${OUT_KEYFRAMES[animOut]} ${dur}s ease infinite`)
     } else {
       const delay = layerDuration > 0 ? Math.max(0, layerDuration - dur) : 0
       animations.push(`${OUT_KEYFRAMES[animOut]} ${dur}s ease ${delay}s both`)

@@ -1,6 +1,7 @@
 """Broadcast control: start/stop, live status, settings, fallback, RTMP test."""
 from __future__ import annotations
 
+import json
 import subprocess
 from typing import Any
 
@@ -288,22 +289,100 @@ class TakePayload(BaseModel):
     playlist_id: int
 
 
+class CountdownPayload(BaseModel):
+    # Playlist item that holds the countdown (preview or program).
+    item_id: int
+    # How the control acts: "add" adds seconds to the countdown's starting value
+    # (persisted on the scene, so the on-air countdown is longer too), "restart"
+    # starts the countdown over by restarting the current item.
+    action: str = "add"
+    seconds: int = Field(default=0, ge=0, le=86400)
+
+
+def _find_countdown(item_id: int) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Resolve a playlist item and its scene's countdown layer, if any."""
+    item = db.query_one("SELECT scene_id FROM playlist_items WHERE id = ?", (item_id,))
+    if not item or not item["scene_id"]:
+        return None, None
+    scene = db.query_one("SELECT id, layers FROM scenes WHERE id = ?", (item["scene_id"],))
+    if not scene:
+        return None, None
+    try:
+        layers = json.loads(scene["layers"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        layers = []
+    for idx, layer in enumerate(layers):
+        if isinstance(layer, dict) and layer.get("type") == "countdown":
+            return {"id": scene["id"], "layers": layers}, {"index": idx, "layer": layer}
+    return {"id": scene["id"], "layers": layers}, None
+
+
+@router.post("/countdown")
+def countdown(payload: CountdownPayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
+    """Control the countdown of the item in the preview or on air.
+
+    `add` grows the countdown's starting value on the scene (so the engine draws
+    a longer timer next time the scene is built) and `restart` restarts the item
+    currently on air, so the countdown begins again.
+    """
+    scene, found = _find_countdown(payload.item_id)
+    if scene is None:
+        raise HTTPException(status_code=404, detail="Élément introuvable")
+    if found is None:
+        raise HTTPException(status_code=404, detail="Aucun compte à rebours sur cet élément")
+
+    if payload.action == "restart":
+        engine = get_engine()
+        if not engine.status().get("running"):
+            # Not on air: nothing to restart, but the preview timer is already
+            # showing the starting value.
+            return {"ok": True, "restarted": False, "seconds": int(found["layer"].get("countdown_seconds") or 60)}
+        result = engine.restart_current()
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("error", "Redémarrage impossible"))
+        return {
+            "ok": True,
+            "restarted": True,
+            "seconds": int(found["layer"].get("countdown_seconds") or 60),
+        }
+
+    if payload.action != "add":
+        raise HTTPException(status_code=422, detail="Action inconnue")
+
+    layers = scene["layers"]
+    layer = layers[found["index"]]
+    new_seconds = int(layer.get("countdown_seconds") or 60) + payload.seconds
+    new_seconds = max(0, min(new_seconds, 86400))
+    layer["countdown_seconds"] = new_seconds
+    db.execute("UPDATE scenes SET layers=?, updated_at=datetime('now') WHERE id=?", (json.dumps(layers), scene["id"]))
+    # When the item is the one on air, restart it so the longer countdown takes
+    # effect immediately instead of at the next cycle.
+    engine = get_engine()
+    st = engine.status()
+    applied = False
+    if st.get("running") and (st.get("current") or {}).get("id") == payload.item_id:
+        engine.restart_current()
+        applied = True
+    return {"ok": True, "seconds": new_seconds, "applied": applied}
+
+
 @router.post("/take")
 def take(payload: TakePayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     """Take a playlist to air (preview -> program).
 
-    This is a switch only: it never starts the broadcast. If the live is stopped,
-    it is refused so the operator starts it explicitly.
+    This is a switch only: it never starts the broadcast. When the live is
+    stopped there is nothing to switch, so it is a silent no-op (no error, no
+    start) — the operator is not told to start the stream first.
     """
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
     engine = get_engine()
     if not engine.status().get("running"):
-        raise HTTPException(status_code=409, detail="Le direct est arrêté. Démarrez-le pour prendre l'antenne.")
+        return {"ok": True, "switched": False}
     result = engine.switch_playlist(payload.playlist_id)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "Échec de la prise d'antenne"))
-    return result
+    return {"ok": True, "switched": True, **result}
 
 
 @router.post("/recover")

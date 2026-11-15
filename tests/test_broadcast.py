@@ -83,7 +83,8 @@ def test_broadcast_start_without_playlist_fails(authed):
 
 def test_take_does_not_start_broadcast(authed, tmp_path):
     # A take is a switch only: it must never start the live. When the broadcast
-    # is stopped the take is refused and nothing goes on air.
+    # is stopped there is nothing to switch, so it is a silent no-op (no error,
+    # no start).
     pid = _setup_playlist(authed, tmp_path)
     authed.put("/api/broadcast/settings", json={
         "output_kind": "file",
@@ -92,7 +93,8 @@ def test_take_does_not_start_broadcast(authed, tmp_path):
     })
     assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
     r = authed.post("/api/broadcast/take", json={"playlist_id": pid})
-    assert r.status_code == 409, r.text
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "switched": False}
     assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
 
 
@@ -140,6 +142,79 @@ def test_ffmpeg_detection(authed):
 
 def test_recover_requires_running_broadcast(authed):
     assert authed.post("/api/broadcast/recover").status_code == 409
+
+
+def _make_countdown_playlist(authed, seconds=60):
+    sid = authed.post("/api/scenes", json={
+        "name": "Compte",
+        "layers": [{"type": "countdown", "countdown_seconds": seconds, "countdown_mode": "down"}],
+    }).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "CD"}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid, "duration": 5})
+    return pid, sid
+
+
+def test_countdown_descriptor_exposed_in_preview(authed):
+    pid, _ = _make_countdown_playlist(authed, 45)
+    data = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()
+    item = data["preview"]["items"][0]
+    assert item["countdown"] == {"layer_index": 0, "seconds": 45, "mode": "down"}
+
+
+def test_countdown_add_time_persists_on_scene(authed):
+    pid, sid = _make_countdown_playlist(authed, 30)
+    item = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "add", "seconds": 30})
+    assert r.status_code == 200, r.text
+    assert r.json()["seconds"] == 60
+    # The scene's starting value really changed (so the engine draws it longer).
+    scene = authed.get(f"/api/scenes/{sid}").json()
+    assert scene["layers"][0]["countdown_seconds"] == 60
+
+
+def test_countdown_restart_when_not_running_is_noop(authed):
+    pid, _ = _make_countdown_playlist(authed)
+    item = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "restart"})
+    assert r.status_code == 200, r.text
+    assert r.json()["restarted"] is False
+
+
+def test_countdown_unknown_item_and_missing_layer(authed):
+    assert authed.post("/api/broadcast/countdown", json={"item_id": 999, "action": "add", "seconds": 10}).status_code == 404
+    # An item whose scene has no countdown layer is rejected too.
+    sid = authed.post("/api/scenes", json={"name": "Sans", "layers": [{"type": "text", "text": "x"}]}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid})
+    item = authed.get(f"/api/playlists/{pid}").json()["items"][0]
+    assert authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "add", "seconds": 10}).status_code == 404
+
+
+def test_countdown_requires_capability(installed):
+    assert installed.post("/api/broadcast/countdown", json={"item_id": 1, "action": "add", "seconds": 10}).status_code == 401
+
+
+def test_countdown_controls_apply_while_running(authed, tmp_path):
+    # On air: adding time restarts the current item so the longer timer shows at
+    # once, and restarting starts the countdown over.
+    pid, _ = _make_countdown_playlist(authed, 20)
+    authed.put("/api/broadcast/settings", json={
+        "output_kind": "file",
+        "output_file": str(tmp_path / "cd.ts"),
+        "stream_width": 160, "stream_height": 120,
+    })
+    assert authed.post("/api/broadcast/start", json={"playlist_id": pid}).status_code == 200
+    try:
+        time.sleep(1.0)
+        item = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]
+        r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "add", "seconds": 10})
+        assert r.status_code == 200, r.text
+        assert r.json()["applied"] is True and r.json()["seconds"] == 30
+        r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "restart"})
+        assert r.status_code == 200, r.text
+        assert r.json()["restarted"] is True
+    finally:
+        authed.post("/api/broadcast/stop")
 
 
 def test_engine_is_independent_singleton():
