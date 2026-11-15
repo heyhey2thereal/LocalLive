@@ -179,6 +179,10 @@ export default function Playlists() {
         background_audio_id:
           patch.background_audio_id !== undefined ? patch.background_audio_id : settingsItem.background_audio_id,
         background_volume: patch.background_volume ?? settingsItem.background_volume,
+        background_audio_continue:
+          patch.background_audio_continue !== undefined
+            ? patch.background_audio_continue
+            : settingsItem.background_audio_continue,
       })
       setSettingsItem(null)
       await load()
@@ -574,6 +578,7 @@ function ItemSettingsModal({
   const [duration, setDuration] = useState(item.transition_duration || 0)
   const [audioId, setAudioId] = useState<number | ''>(item.background_audio_id ?? '')
   const [volume, setVolume] = useState(item.background_volume ?? 0.15)
+  const [continueMusic, setContinueMusic] = useState(Boolean(item.background_audio_continue))
 
   return (
     <Modal
@@ -592,6 +597,7 @@ function ItemSettingsModal({
                 transition_duration: duration,
                 background_audio_id: audioId === '' ? null : Number(audioId),
                 background_volume: volume,
+                background_audio_continue: continueMusic,
               })
             }
           >
@@ -642,6 +648,19 @@ function ItemSettingsModal({
         </select>
         <span className="hint">Piste audio mixée sous l'élément (boucle automatique via la durée).</span>
       </div>
+
+      <label className="flex items-center gap-8 mt-8">
+        <input
+          type="checkbox"
+          checked={continueMusic}
+          onChange={(e) => setContinueMusic(e.target.checked)}
+        />
+        <span className="text-sm">Continuer la musique précédente</span>
+      </label>
+      <span className="hint">
+        L'élément garde la musique de l'élément précédent (elle ne redémarre pas) au lieu de
+        lancer sa propre piste.
+      </span>
 
       <div className="field">
         <label>Volume de la musique ({Math.round(volume * 100)} %)</label>

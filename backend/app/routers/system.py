@@ -271,7 +271,8 @@ def export_config(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> di
         dict(r)
         for r in db.query(
             "SELECT id, playlist_id, media_id, scene_id, position, duration, transition, "
-            "transition_duration, background_audio_id, background_volume FROM playlist_items ORDER BY playlist_id, position"
+            "transition_duration, background_audio_id, background_volume, background_audio_continue "
+              "FROM playlist_items ORDER BY playlist_id, position"
         )
     ]
     data["settings"] = {k: db.get_setting(k) for k in _CONFIG_SETTINGS if db.get_setting(k) is not None}
@@ -342,12 +343,14 @@ def import_config(payload: ImportPayload, user: dict = Depends(require(permissio
             # Media are not exported; keep only the scene link and the overrides.
             conn.execute(
                 """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
-                                              transition, transition_duration, background_audio_id, background_volume)
-                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                                              transition, transition_duration, background_audio_id, background_volume,
+                                              background_audio_continue)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (
                     pid, None, sid, int(row.get("position") or 0), float(row.get("duration") or 0),
                     row.get("transition") or "cut", float(row.get("transition_duration") or 0),
                     None, float(row.get("background_volume") or 0.15),
+                    int(row.get("background_audio_continue") or 0),
                 ),
             )
             items += 1

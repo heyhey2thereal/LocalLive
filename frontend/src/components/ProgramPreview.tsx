@@ -34,28 +34,31 @@ interface SceneLike {
 }
 
 // Countdown layer. On air, `elapsed` is the number of seconds the item has been
-// playing (from the engine), so the timer reflects reality. In the preview
-// (nothing on air yet) `elapsed` is null and we show the starting value, frozen,
-// so the preview never runs ahead of the programme.
+// playing (from the engine), so the timer reflects reality. In the preview,
+// `startedAt` (ms epoch) is set once the operator presses "Démarrer": the timer
+// then counts locally. With neither, the starting value is shown, frozen.
 function Countdown({
   total,
   mode,
   fontPx,
   elapsed = null,
+  startedAt = null,
 }: {
   total: number
   mode: string
   fontPx: number
   elapsed?: number | null
+  startedAt?: number | null
 }) {
   const [now, setNow] = useState(0)
   useEffect(() => {
-    if (elapsed !== null) return
-    const start = Date.now()
-    const t = window.setInterval(() => setNow(Math.floor((Date.now() - start) / 1000)), 250)
+    if (elapsed !== null || startedAt === null) return
+    const t = window.setInterval(() => setNow(Math.floor((Date.now() - startedAt) / 1000)), 250)
     return () => window.clearInterval(t)
-  }, [total, mode, elapsed])
-  const played = elapsed !== null ? elapsed + now : 0
+  }, [total, mode, elapsed, startedAt])
+  // On air: engine elapsed + a local sub-tick. Preview (started): local elapsed.
+  // Otherwise: frozen on the starting value.
+  const played = elapsed !== null ? elapsed + now : startedAt !== null ? Math.floor((Date.now() - startedAt) / 1000) : 0
   const secs = mode === 'up' ? total + played : Math.max(0, total - played)
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
@@ -141,6 +144,7 @@ export function SceneRender({
   animate = false,
   layerDuration = 0,
   elapsed = null,
+  startedAt = null,
 }: {
   scene: SceneLike
   media: Media[]
@@ -152,6 +156,8 @@ export function SceneRender({
   layerDuration?: number
   /** Seconds the item has been on air (drives the countdown); null in preview. */
   elapsed?: number | null
+  /** Preview: ms epoch when the operator started the countdown, or null. */
+  startedAt?: number | null
 }) {
   const scale = width / scene.width
   return (
@@ -220,6 +226,7 @@ export function SceneRender({
                     mode={l.countdown_mode ?? 'down'}
                     fontPx={(l.font_size ?? 96) * scale}
                     elapsed={elapsed}
+                    startedAt={startedAt}
                   />
                 )}
                 {l.type === 'clock' && (
@@ -249,6 +256,7 @@ export function FitScene({
   animate = false,
   layerDuration = 0,
   elapsed = null,
+  startedAt = null,
 }: {
   scene: SceneLike
   media: Media[]
@@ -256,6 +264,7 @@ export function FitScene({
   animate?: boolean
   layerDuration?: number
   elapsed?: number | null
+  startedAt?: number | null
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
@@ -279,6 +288,7 @@ export function FitScene({
           animate={animate}
           layerDuration={layerDuration}
           elapsed={elapsed}
+          startedAt={startedAt}
         />
       )}
     </div>
@@ -307,6 +317,7 @@ function MediaRender({
   reloadKey,
   animate,
   elapsed,
+  startedAt,
 }: {
   item: EngineItem
   width: number
@@ -314,6 +325,7 @@ function MediaRender({
   reloadKey?: string | number
   animate: boolean
   elapsed?: number | null
+  startedAt?: number | null
 }) {
   const [scene, setScene] = useState<SceneLike | null>(null)
   const [media, setMedia] = useState<Media[]>([])
@@ -379,6 +391,7 @@ function MediaRender({
         animate={animate}
         layerDuration={item.duration}
         elapsed={elapsed}
+        startedAt={startedAt}
       />
     )
   }
@@ -418,6 +431,8 @@ interface Props {
   animate?: boolean
   /** Seconds the item has been on air (drives the countdown). */
   elapsed?: number | null
+  /** Preview: ms epoch when the operator started the countdown, or null. */
+  startedAt?: number | null
 }
 
 export default function ProgramPreview({
@@ -429,6 +444,7 @@ export default function ProgramPreview({
   reloadKey,
   animate = false,
   elapsed = null,
+  startedAt = null,
 }: Props) {
   const tileRef = useRef<HTMLDivElement>(null)
   // Whether this monitor is the one the operator selected to hear. It is the
@@ -438,15 +454,16 @@ export default function ProgramPreview({
     () => subscribeMonitorSound((st) => setSoundOn(st.source === soundSource && st.enabled)),
     [soundSource],
   )
-  // `sound` asks to select this monitor on mount. Idempotent: it never turns an
-  // already-selected monitor off, so a page remount does not interrupt it.
+  // `sound` asks to select this monitor on mount and whenever the item changes
+  // (sound is on by default). Idempotent: it never turns an already-selected
+  // monitor off, so muting or a page remount does not interrupt it.
   useEffect(() => {
     if (!sound) return
     if (monitorAudioUrl(item) && !isMonitorSoundSelected(soundSource)) {
       requestMonitorSound(soundSource, item)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sound, soundSource])
+  }, [sound, soundSource, item])
 
   if (!item) {
     return (
@@ -467,6 +484,7 @@ export default function ProgramPreview({
         reloadKey={reloadKey}
         animate={animate}
         elapsed={elapsed}
+        startedAt={startedAt}
       />
       {audioUrl && (
         <button

@@ -272,18 +272,21 @@ def preview(playlist_id: int | None = None, user: dict = Depends(current_user)) 
     program = engine.status()
     preview_items: list[dict[str, Any]] = []
     preview_name = ""
+    preview_loop = True
     if playlist_id is None:
         playlist_id = program.get("playlist_id")
     if playlist_id:
         row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
         if row:
             preview_name = row["name"]
+            preview_loop = bool(row["loop"])
             preview_items = engine.resolve_preview(int(playlist_id))
     return {
         "program": program,
         "preview": {
             "playlist_id": playlist_id,
             "playlist_name": preview_name,
+            "loop": preview_loop,
             "items": preview_items,
             "duration": round(sum(i.get("duration") or 0 for i in preview_items), 2),
         },

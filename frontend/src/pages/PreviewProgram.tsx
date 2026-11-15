@@ -9,14 +9,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } from '../api'
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
+import MusicBar from '../components/MusicBar'
 import { formatDuration, formatUptime, Loading, Modal, useToast } from '../components/ui'
-import { IconArrowRight, IconMusic, IconPlay, IconStop } from '../components/icons'
-import {
-  monitorAudioUrl,
-  setMonitorPageVisible,
-  subscribeMonitorSound,
-  toggleMonitorSound,
-} from '../lib/monitorSound'
+import { IconArrowRight, IconPlay, IconStop } from '../components/icons'
+import { setMonitorPageVisible } from '../lib/monitorSound'
 
 // Map a transition id to a CSS animation class used to animate the monitors.
 function transitionClass(id: string): string {
@@ -29,10 +25,20 @@ function transitionClass(id: string): string {
   return 'tx-fade'
 }
 
-// Controls shown under a monitor whose item carries a countdown layer: restart
-// it, or add time (the seconds are added to the scene's starting value, so the
-// engine draws a longer timer too).
-function CountdownControls({ item, onChanged }: { item: EngineItem; onChanged: () => void }) {
+// Controls shown under a monitor whose item carries a countdown layer: start /
+// restart it, or add time (the seconds are added to the scene's starting value,
+// so the engine draws a longer timer too).
+function CountdownControls({
+  item,
+  onChanged,
+  onStart,
+  running,
+}: {
+  item: EngineItem
+  onChanged: () => void
+  onStart: () => void
+  running: boolean
+}) {
   const { push } = useToast()
   const [busy, setBusy] = useState(false)
   const seconds = item.countdown?.seconds ?? 60
@@ -54,9 +60,24 @@ function CountdownControls({ item, onChanged }: { item: EngineItem; onChanged: (
   return (
     <div className="countdown-controls">
       <span className="text-sm muted-2 nowrap">Compte à rebours · {seconds}s</span>
-      <button className="btn btn-sm" disabled={busy} onClick={() => void send('restart')} title="Relancer le décompte">
-        ↻ Relancer
+      <button
+        className="btn btn-sm btn-primary"
+        disabled={busy}
+        onClick={() => {
+          // On air: restart the item so the countdown starts now. In the preview
+          // (or stopped) it just starts the local timer.
+          if (running) void send('restart')
+          onStart()
+        }}
+        title="Démarrer / relancer le décompte"
+      >
+        ▶ Démarrer
       </button>
+      {running && (
+        <button className="btn btn-sm" disabled={busy} onClick={() => void send('restart')} title="Relancer le décompte">
+          ↻ Relancer
+        </button>
+      )}
       {[10, 30, 60].map((amount) => (
         <button key={amount} className="btn btn-sm" disabled={busy} onClick={() => void send('add', amount)}>
           +{amount}s
@@ -119,22 +140,44 @@ export default function PreviewProgram() {
   const availableOutputs = poll.data?.outputs ?? []
   const reloadKey = `${program?.playlist_id ?? ''}-${preview?.playlist_id ?? ''}-${tick}`
 
-  const previewItem: EngineItem | null = preview?.items[0] ?? null
+  // The preview monitor walks through the playlist on its own timer, advancing to
+  // the next item once the current one's duration has elapsed (so a 5 s scene is
+  // followed by the next item). Reset whenever the playlist changes.
+  const [previewIndex, setPreviewIndex] = useState(0)
+  const previewItems = preview?.items ?? []
+  useEffect(() => {
+    setPreviewIndex(0)
+  }, [preview?.playlist_id])
+  useEffect(() => {
+    if (previewItems.length <= 1) return
+    const current = previewItems[previewIndex] ?? previewItems[0]
+    const seconds = Math.max(0.5, current?.duration || 5)
+    const t = window.setTimeout(() => {
+      setPreviewIndex((i) => (i + 1) % previewItems.length)
+    }, seconds * 1000)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewIndex, preview?.playlist_id, previewItems.map((i) => i.id).join(','), previewItems.map((i) => i.duration).join(',')])
+
+  const previewItem: EngineItem | null = preview?.items[previewIndex] ?? null
   const programItem: EngineItem | null = program?.current ?? null
   const target = selectedId || preview?.playlist_id || null
   const running = Boolean(program?.running)
 
-  // Monitor sound of the preview: a single shared audio element (monitorSound)
-  // so it keeps playing while the operator moves between pages. It is only
-  // *audible* on this page: leaving mutes it (without stopping), returning makes
-  // it audible again instantly.
-  const [previewSoundOn, setPreviewSoundOn] = useState(false)
-  useEffect(() => subscribeMonitorSound((st) => setPreviewSoundOn(st.source === 'preview')), [])
+  // Preview countdown: ms epoch when the operator pressed "Démarrer" for the
+  // current preview item, so the preview timer runs (it is otherwise frozen).
+  const [countdownStart, setCountdownStart] = useState<number | null>(null)
+  useEffect(() => {
+    setCountdownStart(null)
+  }, [previewItem?.id])
+
+  // Monitor sound: the sound is controlled from the program monitor only. This
+  // page just makes the shared element audible while it is shown (leaving only
+  // mutes it, never stops it, so returning is instant).
   useEffect(() => {
     setMonitorPageVisible(true)
     return () => setMonitorPageVisible(false)
   }, [])
-  const previewAudio = monitorAudioUrl(previewItem)
 
   // Seconds the *current program item* has been playing: total position minus
   // the durations of the items already passed. Used by the countdown layer so
@@ -285,6 +328,14 @@ export default function PreviewProgram() {
           <span className={`switcher-tx ${txClass}`} aria-hidden />
           <div className="switcher-head">
             <span className="badge badge-info">APERÇU</span>
+            {preview && (
+              <span
+                className={`badge ${preview.loop ? 'badge-ok' : ''}`}
+                title={preview.loop ? 'La playlist tourne en boucle' : 'Lecture unique'}
+              >
+                {preview.loop ? '↻ Boucle' : '→ Lecture unique'}
+              </span>
+            )}
             <span className="text-sm muted-2 truncate">{preview?.playlist_name || '—'}</span>
           </div>
           <ProgramPreview
@@ -294,8 +345,16 @@ export default function PreviewProgram() {
             soundSource="preview"
             reloadKey={reloadKey}
             animate
+            startedAt={countdownStart}
           />
-          {previewItem?.countdown && <CountdownControls item={previewItem} onChanged={poll.refresh} />}
+          {previewItem?.countdown && (
+            <CountdownControls
+              item={previewItem}
+              running={false}
+              onChanged={poll.refresh}
+              onStart={() => setCountdownStart(Date.now())}
+            />
+          )}
           <div className="switcher-monitor-foot">
             <select
               className="select grow"
@@ -309,14 +368,6 @@ export default function PreviewProgram() {
                 </option>
               ))}
             </select>
-            <button
-              className={`btn btn-sm ${previewSoundOn ? 'btn-primary' : ''}`}
-              disabled={!previewAudio}
-              title={previewSoundOn ? 'Couper le son du moniteur' : 'Écouter le son du moniteur'}
-              onClick={() => toggleMonitorSound('preview', previewItem)}
-            >
-              <IconMusic size={15} /> {previewSoundOn ? 'Son' : 'Muet'}
-            </button>
           </div>
         </div>
 
@@ -341,12 +392,18 @@ export default function PreviewProgram() {
             emptyLabel="La diffusion est à l'arrêt"
             width={520}
             soundSource="program"
+            sound
             reloadKey={reloadKey}
             animate
             elapsed={running ? programElapsed : null}
           />
           {running && programItem?.countdown && (
-            <CountdownControls item={programItem} onChanged={poll.refresh} />
+            <CountdownControls
+              item={programItem}
+              running
+              onChanged={poll.refresh}
+              onStart={() => poll.refresh()}
+            />
           )}
           <div className="switcher-monitor-foot">
             <span className="text-sm muted-2">
@@ -409,10 +466,21 @@ export default function PreviewProgram() {
         <div className="card mt-16">
           <div className="card-head">
             <span className="card-title">Contenu de l'aperçu</span>
+            <span className="text-sm muted-2">
+              {preview.items.length} élément(s) · {formatDuration(preview.duration)}
+            </span>
           </div>
           <div className="list" style={{ maxHeight: 220, overflowY: 'auto' }}>
             {preview.items.map((item, i) => (
-              <div key={item.id} className="row" style={{ padding: '6px 10px' }}>
+              <div
+                key={item.id}
+                className="row"
+                style={{
+                  padding: '6px 10px',
+                  background: i === previewIndex ? 'var(--accent-soft)' : undefined,
+                  border: `1px solid ${i === previewIndex ? 'var(--accent-line)' : 'transparent'}`,
+                }}
+              >
                 <span className="text-sm muted-2" style={{ width: 20 }}>
                   {i + 1}
                 </span>
@@ -420,6 +488,11 @@ export default function PreviewProgram() {
                   <div className="row-title">{item.title}</div>
                   <div className="row-sub">
                     {item.kind} · {formatDuration(item.duration)}
+                    {item.background_audio_url
+                      ? item.background_audio_continue
+                        ? ' · ♪ musique (suite)'
+                        : ' · ♪ musique'
+                      : ''}
                   </div>
                 </div>
               </div>
@@ -427,6 +500,9 @@ export default function PreviewProgram() {
           </div>
         </div>
       )}
+
+      {/* Music of the preview playlist: current track, visual and a seekable bar. */}
+      {preview && preview.items.length > 0 && <MusicBar items={preview.items} />}
 
       {showHelp && (
         <Modal title="Raccourcis clavier" onClose={() => setShowHelp(false)}>

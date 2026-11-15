@@ -1,17 +1,25 @@
 import { useEffect, useState } from 'react'
-import { api, type BroadcastStatus, type ContentStats, type Media, type Scene } from '../api'
+import { useNavigate } from 'react-router-dom'
+import { api, type BroadcastStatus, type ContentStats, type Playlist } from '../api'
 import { usePoll } from '../lib/usePoll'
 import { useToast } from '../components/ui'
-import { SceneThumb } from '../components/ProgramPreview'
+import ProgramPreview from '../components/ProgramPreview'
 import {
+  IconCalendar,
   IconCpu,
   IconDisk,
+  IconLayers,
+  IconMedia,
+  IconPlaylist,
   IconRam,
   IconRefresh,
+  IconSettings,
   IconSignal,
+  IconStreams,
   IconZap,
 } from '../components/icons'
 import { EmptyState, formatBytes, formatDuration, formatUptime, Loading } from '../components/ui'
+import { setMonitorPageVisible } from '../lib/monitorSound'
 
 function MetricBar({ percent }: { percent: number }) {
   const cls = percent >= 90 ? 'crit' : percent >= 70 ? 'warn' : 'ok'
@@ -24,12 +32,17 @@ function MetricBar({ percent }: { percent: number }) {
 
 export default function Dashboard() {
   const { push } = useToast()
+  const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
-  // Scene quick-launch: pick a scene, build a one-item playlist on the fly and
-  // send it straight to air. Saves the operator a trip through Playlists.
-  const [scenes, setScenes] = useState<Scene[]>([])
-  const [media, setMedia] = useState<Media[]>([])
+  const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [stats, setStats] = useState<ContentStats | null>(null)
+
+  // Sound of the program monitor is heard on the dashboard too (muted only when
+  // the operator leaves the page, never stopped).
+  useEffect(() => {
+    setMonitorPageVisible(true)
+    return () => setMonitorPageVisible(false)
+  }, [])
 
   // Live stream timer: re-render every second so the uptime counts up smoothly
   // (the status poll is slower and would make it jump).
@@ -41,12 +54,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      api.get<{ items: Scene[] }>('/api/scenes').catch(() => ({ items: [] })),
-      api.get<{ items: Media[] }>('/api/media').catch(() => ({ items: [] })),
+      api.get<{ items: Playlist[] }>('/api/playlists').catch(() => ({ items: [] })),
       api.get<ContentStats>('/api/system/stats').catch(() => null),
-    ]).then(([s, m, st]) => {
-      setScenes(s.items)
-      setMedia(m.items)
+    ]).then(([p, st]) => {
+      setPlaylists(p.items)
       setStats(st)
     })
   }, [])
@@ -73,14 +84,17 @@ export default function Dashboard() {
     }
   }
 
-  // Build a one-item playlist for a scene and take it to air in one step.
-  const quickLaunch = async (scene: Scene) => {
+  // Put a whole playlist on air in one step (or line it up when stopped).
+  const takePlaylist = async (playlistId: number) => {
     setBusy(true)
     try {
-      const pl = await api.post<{ id: number }>('/api/playlists', { name: `Direct — ${scene.name}` })
-      await api.post(`/api/playlists/${pl.id}/items`, { scene_id: scene.id })
-      await api.post('/api/broadcast/start', { playlist_id: pl.id, output_id: 'primary' })
-      push({ kind: 'ok', title: 'Scène à l’antenne', message: scene.name })
+      if (engine.running) {
+        await api.post('/api/broadcast/take', { playlist_id: playlistId })
+        push({ kind: 'ok', title: 'Playlist à l’antenne' })
+      } else {
+        await api.post('/api/broadcast/start', { playlist_id: playlistId, output_id: 'primary' })
+        push({ kind: 'ok', title: 'Diffusion démarrée' })
+      }
       poll.refresh()
     } catch (err: any) {
       push({ kind: 'err', title: 'Mise à l’antenne impossible', message: err?.message ?? '' })
@@ -92,9 +106,19 @@ export default function Dashboard() {
   if (!status) return <Loading />
 
   const engine = status.engine
+
+  const currentPlaylistId = engine.playlist_id
+  const nextPlaylist = () => {
+    if (playlists.length === 0) return
+    const idx = playlists.findIndex((p) => p.id === currentPlaylistId)
+    const next = playlists[(idx + 1) % playlists.length]
+    if (next) void takePlaylist(next.id)
+  }
+
   const streamSeconds = engine.started_at ? Math.max(0, Math.floor(Date.now() / 1000 - engine.started_at)) : 0
   const sys = status.system
   const current = engine.current
+  const rtmpOk = engine.running && engine.output?.kind === 'rtmp'
   const next = engine.next
   const progress =
     engine.cycle_duration > 0
@@ -111,8 +135,6 @@ export default function Dashboard() {
         )
       : 0
 
-  const previewUrl = current?.stream_url ?? null
-  const rtmpOk = engine.running && engine.output?.kind === 'rtmp'
 
   return (
     <>
@@ -157,32 +179,25 @@ export default function Dashboard() {
       <div className="grid grid-2" style={{ gridTemplateColumns: '1.55fr 1fr' }}>
         <div className="card">
           <div className="card-head">
-            <span className="card-title">Aperçu du programme</span>
-            {engine.running && (
+            <span className="card-title">Programme</span>
+            {engine.running ? (
               <span className="badge badge-live">
                 <span className="dot dot-live" /> EN DIRECT
               </span>
-            )}
-          </div>
-          <div className="stage">
-            {engine.running && previewUrl ? (
-              current?.kind === 'image' ? (
-                <img src={previewUrl} alt="aperçu" />
-              ) : (
-                <video src={previewUrl} muted autoPlay loop playsInline />
-              )
             ) : (
-              <div className="stage-empty">
-                <IconSignal size={34} />
-                <span>La diffusion est à l'arrêt</span>
-              </div>
-            )}
-            {engine.running && (
-              <div className="stage-live-tag">
-                <span className="dot dot-live" /> {engine.pipeline === 'copy' ? 'COPIE DIRECTE' : 'ENCODAGE'}
-              </div>
+              <span className="badge">À l'arrêt</span>
             )}
           </div>
+          {/* The program monitor is shown even when the live is stopped, so the
+              operator always sees what is lined up. */}
+          <ProgramPreview
+            item={current}
+            emptyLabel="Aucun programme préparé"
+            width={640}
+            soundSource="dashboard"
+            sound
+            animate
+          />
 
           <div className="mt-16">
             <div className="flex justify-between items-center mb-8">
@@ -318,33 +333,54 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {scenes.length > 0 && (
-        <div className="card mt-24">
-          <div className="card-head">
-            <span className="card-title">Mise à l'antenne rapide</span>
-            <span className="text-sm muted-2">Un clic : la scène part en direct</span>
-          </div>
-          <div className="quick-scenes">
-            {scenes.slice(0, 12).map((s) => (
-              <button
-                key={s.id}
-                className="quick-scene"
-                disabled={busy}
-                onClick={() => void quickLaunch(s)}
-                title={`Mettre « ${s.name} » à l'antenne`}
-              >
-                <span className="quick-scene-thumb">
-                  <SceneThumb scene={s} media={media} width={160} />
-                  <span className="quick-scene-play">
-                    <IconZap size={16} />
-                  </span>
-                </span>
-                <span className="quick-scene-name truncate">{s.name}</span>
-              </button>
-            ))}
-          </div>
+      <div className="card mt-24">
+        <div className="card-head">
+          <span className="card-title">Raccourcis</span>
+          <span className="text-sm muted-2">Accès direct aux actions courantes</span>
         </div>
-      )}
+        <div className="shortcut-grid">
+          <button className="shortcut" disabled={busy} onClick={() => void nextPlaylist()} title="Diffuser la playlist suivante">
+            <IconZap size={18} />
+            <span className="shortcut-title">Playlist suivante</span>
+            <span className="shortcut-sub">Bascule vers la playlist suivante</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/preview')}>
+            <IconSignal size={18} />
+            <span className="shortcut-title">Aperçu / Programme</span>
+            <span className="shortcut-sub">Régie et prise d'antenne</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/playlists')}>
+            <IconPlaylist size={18} />
+            <span className="shortcut-title">Playlists</span>
+            <span className="shortcut-sub">Composer la programmation</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/scenes')}>
+            <IconLayers size={18} />
+            <span className="shortcut-title">Scènes</span>
+            <span className="shortcut-sub">Éditer les habillages</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/media')}>
+            <IconMedia size={18} />
+            <span className="shortcut-title">Médiathèque</span>
+            <span className="shortcut-sub">Importer et gérer les médias</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/schedule')}>
+            <IconCalendar size={18} />
+            <span className="shortcut-title">Programmation</span>
+            <span className="shortcut-sub">Plages horaires automatiques</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/streams')}>
+            <IconStreams size={18} />
+            <span className="shortcut-title">Flux de sortie</span>
+            <span className="shortcut-sub">Destinations RTMP / fichier</span>
+          </button>
+          <button className="shortcut" onClick={() => navigate('/settings')}>
+            <IconSettings size={18} />
+            <span className="shortcut-title">Paramètres</span>
+            <span className="shortcut-sub">Chaîne, mise à jour, maintenance</span>
+          </button>
+        </div>
+      </div>
 
       {stats && (
         <div className="card mt-24">

@@ -470,3 +470,51 @@ def test_user_create_strips_username(authed):
     # one, so " bob" and "bob" could both be created.
     assert authed.post("/api/users", json={"username": "  bob  ", "password": "SuperSecret123", "role": "viewer"}).json()["username"] == "bob"
     assert authed.post("/api/users", json={"username": "bob", "password": "SuperSecret123", "role": "viewer"}).status_code == 409
+
+
+# --- 2.13.2: continue-music, preview loop ----------------------------------
+
+def test_continue_previous_music(installed, tmp_path):
+    # An item flagged "continue previous music" keeps the previous item's track
+    # (same id) instead of starting its own.
+    a = _audio(tmp_path)
+    db.execute(
+        "INSERT INTO media(title, filename, path, kind, mime, size, duration, has_audio) VALUES(?,?,?,?,?,?,?,?)",
+        ("Music", a.name, str(a), "audio", "audio/mpeg", a.stat().st_size, 2.0, 1),
+    )
+    aid = db.query_one("SELECT id FROM media WHERE title='Music'")["id"]
+    s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration, background_audio_id, background_volume) "
+        "VALUES(?,?,?,?,?,?)",
+        (pid, s1, 0, 4.0, aid, 0.5),
+    )
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration, background_audio_continue) VALUES(?,?,?,?,?)",
+        (pid, s2, 1, 4.0, 1),
+    )
+    items = PlaybackEngine()._resolve_items(pid)
+    assert items[0]["background_audio_id"] == aid
+    # The second item inherits the same track and volume, with a real path.
+    assert items[1]["background_audio_id"] == aid
+    assert items[1]["background_volume"] == 0.5
+    assert items[1]["background_audio_path"]
+
+
+def test_preview_exposes_loop_flag(authed):
+    pid = authed.post("/api/playlists", json={"name": "Boucle", "loop": False}).json()["id"]
+    authed.post(f"/api/playlists/{pid}/items", json={"scene_id": authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]})
+    data = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()
+    assert data["preview"]["loop"] is False
+
+
+def test_item_patch_continue_music(authed):
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    item = authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid}).json()["items"][0]
+    assert item["background_audio_continue"] is False
+    authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"background_audio_continue": True})
+    after = authed.get(f"/api/playlists/{pid}").json()["items"][0]
+    assert after["background_audio_continue"] is True

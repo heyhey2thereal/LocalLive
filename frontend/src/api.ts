@@ -118,6 +118,7 @@ export interface PlaylistItem {
   background_audio_id: number | null
   background_audio_title: string | null
   background_volume: number
+  background_audio_continue: boolean
 }
 
 export interface Playlist {
@@ -221,7 +222,10 @@ export interface EngineItem {
   stream_url: string | null
   background_audio_id?: number | null
   background_audio_url?: string | null
+  background_audio_title?: string | null
   background_volume?: number
+  /** Item keeps the previous item's music (does not start its own). */
+  background_audio_continue?: boolean
   /** First countdown layer of a scene item, when it has one. */
   countdown?: CountdownInfo | null
   exists: boolean
@@ -317,6 +321,7 @@ export interface PreviewData {
   preview: {
     playlist_id: number | null
     playlist_name: string
+    loop: boolean
     items: EngineItem[]
     duration: number
   }

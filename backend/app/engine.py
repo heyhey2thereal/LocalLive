@@ -303,9 +303,10 @@ class PlaybackEngine:
             """SELECT pi.id, pi.position, pi.duration AS override_duration,
                       pi.transition, pi.transition_duration,
                       pi.background_audio_id, pi.background_volume,
+                      pi.background_audio_continue,
                       m.id AS media_id, m.title, m.path, m.kind, m.duration, m.has_audio,
                       m.width, m.height, m.fps, m.video_codec, m.audio_codec, m.thumbnail,
-                      bg.path AS bg_path, bg.duration AS bg_duration,
+                      bg.path AS bg_path, bg.duration AS bg_duration, bg.title AS bg_title,
                       s.id AS scene_id, s.name AS scene_name, s.layers AS scene_layers,
                       s.width AS scene_width, s.height AS scene_height, s.background AS scene_bg
                FROM playlist_items pi
@@ -318,6 +319,9 @@ class PlaybackEngine:
         )
         default_image = float(db.get_setting("image_duration", "5") or 5)
         items: list[dict[str, Any]] = []
+        prev_bg_path: str | None = None
+        prev_bg_id: int | None = None
+        prev_bg_volume = 0.0
         for r in rows:
             d = dict(r)
             if d["scene_id"]:
@@ -339,6 +343,15 @@ class PlaybackEngine:
             d["background_volume"] = float(d.get("background_volume") or 0)
             bg_path = d.get("bg_path")
             d["background_audio_path"] = bg_path if bg_path and Path(bg_path).exists() else None
+            # "Continue previous music": keep playing the track of the item above
+            # instead of starting a new one (the music does not restart).
+            if d.get("background_audio_continue") and prev_bg_path:
+                d["background_audio_path"] = prev_bg_path
+                d["background_audio_id"] = prev_bg_id
+                d["background_volume"] = prev_bg_volume
+            prev_bg_path = d.get("background_audio_path")
+            prev_bg_id = d.get("background_audio_id")
+            prev_bg_volume = d.get("background_volume")
             items.append(d)
         return items
 
@@ -1064,7 +1077,9 @@ def _public_item(item: dict[str, Any]) -> dict[str, Any]:
         # play it in full screen; it is mixed under the item on air.
         "background_audio_id": bg_id,
         "background_audio_url": f"/api/media/{bg_id}/stream" if bg_id else None,
+        "background_audio_title": item.get("bg_title"),
         "background_volume": float(item.get("background_volume") or 0),
+        "background_audio_continue": bool(item.get("background_audio_continue")),
         "countdown": _countdown_descriptor(item),
         "exists": bool(item.get("exists")),
     }

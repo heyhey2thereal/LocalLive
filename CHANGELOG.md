@@ -3,6 +3,37 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.14.0] — 2026-11-15
+
+### Ajouté
+- **Barre de musique sous l'aperçu** : quand la playlist d'aperçu contient une
+  musique, une barre apparaît en bas de page — titre en cours, **visuel** (la
+  forme d'onde générée par le serveur) et **barre de progression déplaçable** :
+  glisser la barre **recule ou avance** la musique en direct.
+- **« Continuer la musique précédente »** : nouveau réglage par élément de
+  playlist. L'élément garde la musique de l'élément précédent (elle **ne
+  redémarre pas**) au lieu de lancer sa propre piste.
+- **Boucle affichée** : le moniteur d'aperçu montre si la playlist tourne **en
+  boucle** ou en **lecture unique** (selon la configuration de la playlist).
+- **Comptes à rebours démarrables** : un bouton **« ▶ Démarrer »** apparaît sous
+  le moniteur ; dans l'aperçu il lance le décompte, à l'antenne il relance
+  l'élément. Les boutons **+10 / +30 / +60 s** restent disponibles.
+- **Tableau de bord** : la fenêtre **Programme** est affichée **même quand la
+  diffusion est à l'arrêt** (on voit ce qui est programmé), avec le son.
+- **Son activé par défaut** à l'ouverture de l'interface.
+- **Raccourcis** (tableau de bord) : la « mise à l'antenne rapide » est remplacée
+  par une grille de **raccourcis** (playlist suivante, aperçu/programme,
+  playlists, scènes, médiathèque, programmation, flux, paramètres).
+
+### Corrigé
+- **Enchaînement de l'aperçu** : le moniteur d'aperçu **défile désormais dans la
+  playlist** (une scène de 5 s est suivie de l'élément suivant) au lieu de rester
+  bloqué sur le premier élément.
+- **Bouton muet retiré de la fenêtre d'aperçu** : le son se règle **uniquement**
+  depuis le moniteur Programme.
+- **Son** : l'audibilité est **comptée** (plusieurs pages de diffusion) ; le son
+  ne se coupe pas entre deux pages et ne redémarre jamais.
+
 ## [2.13.1] — 2026-11-15
 
 ### Corrigé

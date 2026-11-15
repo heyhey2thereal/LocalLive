@@ -19,7 +19,7 @@
 
 import type { EngineItem } from '../api'
 
-export type MonitorSource = 'preview' | 'program' | 'window'
+export type MonitorSource = 'preview' | 'program' | 'window' | 'dashboard'
 
 export interface MonitorSoundState {
   /** The source the operator selected, or null when nothing is selected. */
@@ -41,12 +41,12 @@ let gain: GainNode | null = null
 let currentUrl: string | null = null
 let currentSource: MonitorSource | null = null
 let enabled = false
-let pageVisible = false
+let visibleClaims = 0
 let lastVolume = 1
 const listeners = new Set<Listener>()
 
 function shouldBeAudible(): boolean {
-  return enabled && pageVisible
+  return enabled && visibleClaims > 0
 }
 
 function state(): MonitorSoundState {
@@ -234,7 +234,10 @@ export function isMonitorSoundSelected(source: MonitorSource): boolean {
  * mutes it (never stops it) and returning is instant.
  */
 export function setMonitorPageVisible(value: boolean): void {
-  pageVisible = value
+  // Counted claims so a route swap (one page unmounts as another mounts) can
+  // never leave the sound muted: the element stays audible while any broadcast
+  // page is shown.
+  visibleClaims = Math.max(0, visibleClaims + (value ? 1 : -1))
   applyGain()
   emit()
 }

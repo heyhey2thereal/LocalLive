@@ -140,6 +140,9 @@ _MIGRATIONS = [
             "transition_duration": "REAL NOT NULL DEFAULT 0",
             "background_audio_id": "INTEGER REFERENCES media(id) ON DELETE SET NULL",
             "background_volume": "REAL NOT NULL DEFAULT 0.15",
+            # When set, the item keeps playing the previous item's background
+            # music instead of starting its own (music continues across items).
+            "background_audio_continue": "INTEGER NOT NULL DEFAULT 0",
         },
     ),
     (
