@@ -81,9 +81,9 @@ def test_broadcast_start_without_playlist_fails(authed):
     assert r.status_code == 422
 
 
-def test_take_starts_broadcast_when_stopped(authed, tmp_path):
-    # Putting a playlist on programme must work without a separate "start the
-    # live" step: the take itself starts the broadcast when it is idle.
+def test_take_does_not_start_broadcast(authed, tmp_path):
+    # A take is a switch only: it must never start the live. When the broadcast
+    # is stopped the take is refused and nothing goes on air.
     pid = _setup_playlist(authed, tmp_path)
     authed.put("/api/broadcast/settings", json={
         "output_kind": "file",
@@ -92,12 +92,30 @@ def test_take_starts_broadcast_when_stopped(authed, tmp_path):
     })
     assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
     r = authed.post("/api/broadcast/take", json={"playlist_id": pid})
-    assert r.status_code == 200, r.text
-    time.sleep(1.5)
-    status = authed.get("/api/broadcast/status").json()
-    assert status["engine"]["running"] is True
-    assert status["engine"]["playlist_name"] == "Live"
-    authed.post("/api/broadcast/stop")
+    assert r.status_code == 409, r.text
+    assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
+
+
+def test_take_switches_when_running(authed, tmp_path):
+    pid = _setup_playlist(authed, tmp_path)
+    # The target playlist must not be empty (a switch to an empty list fails).
+    v = tmp_path / "w.mp4"
+    _make_video(v)
+    with v.open("rb") as fh:
+        item = authed.post("/api/media/upload", files={"files": (v.name, fh, "video/mp4")}).json()["items"][0]
+    other = authed.post("/api/playlists", json={"name": "Autre"}).json()["id"]
+    authed.post(f"/api/playlists/{other}/items", json={"media_id": item["id"]})
+    authed.put("/api/broadcast/settings", json={
+        "output_kind": "file",
+        "output_file": str(tmp_path / "switch.ts"),
+        "stream_width": 160, "stream_height": 120,
+    })
+    assert authed.post("/api/broadcast/start", json={"playlist_id": pid}).status_code == 200
+    try:
+        r = authed.post("/api/broadcast/take", json={"playlist_id": other})
+        assert r.status_code == 200, r.text
+    finally:
+        authed.post("/api/broadcast/stop")
 
 
 def test_broadcast_requires_admin(installed):

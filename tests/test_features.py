@@ -157,6 +157,35 @@ def test_skip_requires_admin(installed):
     assert installed.post("/api/broadcast/next").status_code == 401
 
 
+# --- fonts -----------------------------------------------------------------
+def test_font_catalog_and_resolution():
+    catalog = fx.font_catalog()
+    assert any(f["id"] == "default" for f in catalog)
+    # The default resolves to a real file on this host.
+    assert fx.resolve_font("default") and Path(fx.resolve_font("default")).exists()
+    # An unknown id falls back to the default rather than failing.
+    assert fx.resolve_font("does-not-exist") == fx.font_path()
+
+
+def test_marquee_is_single_pass():
+    # The marquee now crosses the frame once (no modulo) so it does not "spam".
+    expr = fx.animation_exprs("marquee", 10, 20, speed=80)["x"]
+    assert "mod(" not in expr
+    assert expr.startswith("w-min(")
+
+
+def test_rainbow_border_cycles_colours():
+    boxes = fx.rainbow_border(0, 0, 200, 100, speed=0.5)
+    assert len(boxes) == len(fx.RAINBOW_COLORS)
+    assert all("drawbox" in b and "enable=" in b for b in boxes)
+
+
+def test_rainbow_loop_does_not_move_text():
+    # The rainbow loop only draws a border: the text position/alpha are unchanged.
+    motion = fx.layer_motion(10, 20, anim_loop="rainbow")
+    assert motion["x"] == "10" and motion["y"] == "20" and motion["alpha"] == "1"
+
+
 # --- playlist duration fixes (2.9.0) --------------------------------------
 def test_scene_item_effective_duration_uses_default(authed):
     # A scene has no intrinsic duration: the API must report the default, not 0,

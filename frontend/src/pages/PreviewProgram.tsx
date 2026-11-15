@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type Catalog, type EngineItem, type Playlist, type PreviewData } from '../api'
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
-import { formatDuration, Loading, Modal, useToast } from '../components/ui'
+import { formatDuration, formatUptime, Loading, Modal, useToast } from '../components/ui'
 import { IconArrowRight, IconPlay, IconStop } from '../components/icons'
 
 // Map a transition id to a CSS animation class used to animate the monitors.
@@ -64,22 +64,46 @@ export default function PreviewProgram() {
     void loadPlaylists()
   }, [loadPlaylists])
 
-  const program = poll.data?.program
-  const preview = poll.data?.preview
-  const availableOutputs = poll.data?.outputs ?? []
-
   // Periodically refresh the rendered content so scene edits appear live.
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const t = window.setInterval(() => setTick((v) => v + 1), 2000)
     return () => window.clearInterval(t)
   }, [])
+
+  const program = poll.data?.program
+  const preview = poll.data?.preview
+  const availableOutputs = poll.data?.outputs ?? []
   const reloadKey = `${program?.playlist_id ?? ''}-${preview?.playlist_id ?? ''}-${tick}`
 
   const previewItem: EngineItem | null = preview?.items[0] ?? null
   const programItem: EngineItem | null = program?.current ?? null
   const target = selectedId || preview?.playlist_id || null
   const running = Boolean(program?.running)
+
+  // Seconds the *current program item* has been playing: total position minus
+  // the durations of the items already passed. Used by the countdown layer so
+  // the monitor matches the actual on-air timer instead of restarting on load.
+  const programElapsed =
+    program && program.current_index >= 0
+      ? Math.max(
+          0,
+          program.position -
+            program.items
+              .slice(0, program.current_index)
+              .reduce((sum, it) => sum + (it.duration || 0), 0),
+        )
+      : 0
+
+  // Live stream timer (uptime of the broadcast), ticking every second.
+  const [, forceTick] = useState(0)
+  useEffect(() => {
+    const t = window.setInterval(() => forceTick((v) => v + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+  const streamSeconds = program?.started_at
+    ? Math.max(0, Math.floor(Date.now() / 1000 - program.started_at))
+    : 0
 
   const playTransition = () => {
     const cls = transitionClass(transition)
@@ -88,13 +112,19 @@ export default function PreviewProgram() {
     txTimer.current = window.setTimeout(() => setTxClass(''), 900)
   }
 
-  // Take the preview to air. This is a take, not a separate "start the live"
-  // step: if the broadcast is stopped, the take starts it with the chosen
-  // playlist (the backend `switch_playlist` starts the engine when it is idle),
-  // then swaps preview/program.
+  // Take the preview to air: swap preview/program WITHOUT starting the live.
+  // The broadcast is started only by the explicit "Démarrer le direct" button.
   const swap = async () => {
     if (!target) {
       push({ kind: 'err', title: 'Choisissez d’abord une playlist dans l’aperçu' })
+      return
+    }
+    if (!running) {
+      push({
+        kind: 'info',
+        title: 'Le direct est arrêté',
+        message: 'Démarrez le direct pour prendre l’antenne.',
+      })
       return
     }
     setBusy(true)
@@ -102,11 +132,7 @@ export default function PreviewProgram() {
     playTransition()
     try {
       await api.post('/api/broadcast/take', { playlist_id: target })
-      push({
-        kind: 'ok',
-        title: 'Prise d’antenne effectuée',
-        message: running ? undefined : 'La diffusion a été démarrée.',
-      })
+      push({ kind: 'ok', title: 'Prise d’antenne effectuée' })
       setSelectedId(previousProgram ?? '')
       poll.refresh()
     } catch (err: any) {
@@ -238,13 +264,18 @@ export default function PreviewProgram() {
             </span>
             <span className="text-sm muted-2 truncate">{program?.playlist_name || '—'}</span>
           </div>
-          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} reloadKey={reloadKey} sound animate />
+          <ProgramPreview item={programItem} emptyLabel="La diffusion est à l'arrêt" width={520} reloadKey={reloadKey} sound animate elapsed={running ? programElapsed : null} />
           <div className="switcher-monitor-foot">
             <span className="text-sm muted-2">
               {running && program
                 ? `${formatDuration(program.position)} / ${formatDuration(program.cycle_duration)}`
                 : 'Diffusion à l’arrêt'}
             </span>
+            {running ? (
+              <span className="badge badge-live" title="Durée du direct">
+                ● {formatUptime(streamSeconds)}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

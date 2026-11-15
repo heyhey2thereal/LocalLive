@@ -20,15 +20,30 @@ interface SceneLike {
   layers: SceneLayer[]
 }
 
-// Live MM:SS clock, ticking every second, mirroring the FFmpeg drawtext timer.
-function Countdown({ total, mode, fontPx }: { total: number; mode: string; fontPx: number }) {
+// Countdown layer. On air, `elapsed` is the number of seconds the item has been
+// playing (from the engine), so the timer reflects reality. In the preview
+// (nothing on air yet) `elapsed` is null and we show the starting value, frozen,
+// so the preview never runs ahead of the programme.
+function Countdown({
+  total,
+  mode,
+  fontPx,
+  elapsed = null,
+}: {
+  total: number
+  mode: string
+  fontPx: number
+  elapsed?: number | null
+}) {
   const [now, setNow] = useState(0)
   useEffect(() => {
+    if (elapsed !== null) return
     const start = Date.now()
     const t = window.setInterval(() => setNow(Math.floor((Date.now() - start) / 1000)), 250)
     return () => window.clearInterval(t)
-  }, [total, mode])
-  const secs = mode === 'up' ? total + now : Math.max(0, total - now)
+  }, [total, mode, elapsed])
+  const played = elapsed !== null ? elapsed + now : 0
+  const secs = mode === 'up' ? total + played : Math.max(0, total - played)
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
   return <span style={{ fontSize: fontPx }}>{mm}:{ss}</span>
@@ -112,6 +127,7 @@ export function SceneRender({
   preferThumb = false,
   animate = false,
   layerDuration = 0,
+  elapsed = null,
 }: {
   scene: SceneLike
   media: Media[]
@@ -121,6 +137,8 @@ export function SceneRender({
   animate?: boolean
   /** On-air duration of each layer, used to delay OUT animations. */
   layerDuration?: number
+  /** Seconds the item has been on air (drives the countdown); null in preview. */
+  elapsed?: number | null
 }) {
   const scale = width / scene.width
   return (
@@ -186,6 +204,7 @@ export function SceneRender({
                     total={l.countdown_seconds ?? 60}
                     mode={l.countdown_mode ?? 'down'}
                     fontPx={(l.font_size ?? 96) * scale}
+                    elapsed={elapsed}
                   />
                 )}
                 {l.type === 'clock' && (
@@ -214,12 +233,14 @@ export function FitScene({
   preferThumb,
   animate = false,
   layerDuration = 0,
+  elapsed = null,
 }: {
   scene: SceneLike
   media: Media[]
   preferThumb?: boolean
   animate?: boolean
   layerDuration?: number
+  elapsed?: number | null
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
@@ -242,6 +263,7 @@ export function FitScene({
           preferThumb={preferThumb}
           animate={animate}
           layerDuration={layerDuration}
+          elapsed={elapsed}
         />
       )}
     </div>
@@ -269,12 +291,14 @@ function MediaRender({
   sound,
   reloadKey,
   animate,
+  elapsed,
 }: {
   item: EngineItem
   width: number
   sound: boolean
   reloadKey?: string | number
   animate: boolean
+  elapsed?: number | null
 }) {
   const [scene, setScene] = useState<SceneLike | null>(null)
   const [media, setMedia] = useState<Media[]>([])
@@ -304,40 +328,81 @@ function MediaRender({
     // reflects edits without a manual refresh.
   }, [item.scene_id, item.media_id, reloadKey])
 
+  // Background music mixed under the item: played (at its volume) only when the
+  // monitor has sound on, so full screen lets the operator hear it too.
+  const backgroundAudio =
+    sound && item.background_audio_url ? (
+      <audio
+        src={item.background_audio_url}
+        autoPlay
+        loop
+        ref={(el) => {
+          if (el) el.volume = Math.min(Math.max(item.background_volume ?? 0.15, 0), 1)
+        }}
+      />
+    ) : null
+
   if (item.scene_id) {
     if (!ready || !scene) return <div className="stage-empty">Chargement…</div>
     return (
-      <FitScene
-        scene={scene}
-        media={media}
-        preferThumb={width < 480}
-        animate={animate}
-        layerDuration={item.duration}
-      />
+      <>
+        {backgroundAudio}
+        <FitScene
+          scene={scene}
+          media={media}
+          preferThumb={width < 480}
+          animate={animate}
+          layerDuration={item.duration}
+          elapsed={elapsed}
+        />
+      </>
     )
   }
+
   if (item.kind === 'image' && item.stream_url) {
-    return <img className="fit-media" src={item.stream_url} alt={item.title} />
+    return (
+      <>
+        {backgroundAudio}
+        <img className="fit-media" src={item.stream_url} alt={item.title} />
+      </>
+    )
   }
   if (item.kind === 'video' && item.stream_url) {
     return (
-      <video
-        className="fit-media"
-        src={item.stream_url}
-        muted={!sound}
-        autoPlay
-        loop
-        playsInline
-        controls={sound}
-      />
+      <>
+        {backgroundAudio}
+        <video
+          className="fit-media"
+          src={item.stream_url}
+          muted={!sound}
+          autoPlay
+          loop
+          playsInline
+          controls={sound}
+        />
+      </>
     )
   }
-  if (item.kind === 'audio') {
+  if (item.kind === 'audio' && item.stream_url) {
+    // An audio-only item has no picture: play the sound itself (so it is audible
+    // in full screen), keeping a short label on screen.
     return (
-      <div className="stage-empty">
-        <span style={{ fontWeight: 600 }}>{item.title}</span>
-        <span className="text-sm muted-2">Piste audio</span>
-      </div>
+      <>
+        <audio src={item.stream_url} autoPlay loop muted={!sound} controls={sound} />
+        <div className="stage-empty">
+          <span style={{ fontWeight: 600 }}>{item.title}</span>
+          <span className="text-sm muted-2">Piste audio</span>
+        </div>
+      </>
+    )
+  }
+  if (item.scene_id) {
+    // Scene items can also carry background music.
+    return (
+      <>
+        {backgroundAudio}
+        <div className="stage-empty">—</div>
+      </>
     )
   }
   return <div className="stage-empty">—</div>
@@ -351,6 +416,8 @@ interface Props {
   reloadKey?: string | number
   /** Play the scene layers' IN/LOOP/OUT animations (monitors). */
   animate?: boolean
+  /** Seconds the item has been on air (drives the countdown). */
+  elapsed?: number | null
 }
 
 export default function ProgramPreview({
@@ -360,6 +427,7 @@ export default function ProgramPreview({
   sound = false,
   reloadKey,
   animate = false,
+  elapsed = null,
 }: Props) {
   const tileRef = useRef<HTMLDivElement>(null)
   // Enabling sound is allowed once the user has interacted; the full-screen
@@ -378,7 +446,7 @@ export default function ProgramPreview({
   }
   return (
     <div className="program-tile" ref={tileRef}>
-      <MediaRender item={item} width={width} sound={soundOn} reloadKey={reloadKey} animate={animate} />
+      <MediaRender item={item} width={width} sound={soundOn} reloadKey={reloadKey} animate={animate} elapsed={elapsed} />
       <button
         className="program-fullscreen"
         title="Plein écran (avec son)"

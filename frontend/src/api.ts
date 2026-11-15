@@ -157,6 +157,7 @@ export interface SceneLayer {
   media_id?: number | null
   text?: string | null
   font_size?: number
+  font?: string
   color?: string
   background?: string | null
   animation?: string
@@ -212,6 +213,9 @@ export interface EngineItem {
   duration: number
   thumbnail: string | null
   stream_url: string | null
+  background_audio_id?: number | null
+  background_audio_url?: string | null
+  background_volume?: number
   exists: boolean
 }
 
@@ -356,6 +360,7 @@ export interface Catalog {
   visualizers: CatalogOption[]
   clock_formats?: CatalogOption[]
   clock_locales?: CatalogOption[]
+  fonts?: { id: string; label: string }[]
   layer_types: LayerTypeInfo[]
   code_examples: { label: string; code: string }[]
   roles?: { id: string; label: string; description: string }[]

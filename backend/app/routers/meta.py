@@ -93,6 +93,7 @@ def catalog(user: dict = Depends(current_user)) -> dict[str, Any]:
         "visualizers": fx.visualizers_catalog(),
         "clock_formats": fx.clock_formats_catalog(),
         "clock_locales": fx.clock_locales_catalog(),
+        "fonts": fx.font_catalog(),
         "roles": permissions.ROLES,
         "capabilities": permissions.capabilities_catalog(),
         "layer_types": LAYER_TYPES,

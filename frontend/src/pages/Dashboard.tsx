@@ -31,6 +31,14 @@ export default function Dashboard() {
   const [media, setMedia] = useState<Media[]>([])
   const [stats, setStats] = useState<ContentStats | null>(null)
 
+  // Live stream timer: re-render every second so the uptime counts up smoothly
+  // (the status poll is slower and would make it jump).
+  const [, forceTick] = useState(0)
+  useEffect(() => {
+    const t = window.setInterval(() => forceTick((v) => v + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+
   useEffect(() => {
     Promise.all([
       api.get<{ items: Scene[] }>('/api/scenes').catch(() => ({ items: [] })),
@@ -84,6 +92,7 @@ export default function Dashboard() {
   if (!status) return <Loading />
 
   const engine = status.engine
+  const streamSeconds = engine.started_at ? Math.max(0, Math.floor(Date.now() / 1000 - engine.started_at)) : 0
   const sys = status.system
   const current = engine.current
   const next = engine.next
@@ -136,7 +145,11 @@ export default function Dashboard() {
           icon={<IconSignal size={18} />}
           label="Diffusion"
           value={engine.running ? 'EN DIRECT' : 'ARRÊT'}
-          sub={engine.running ? formatUptime(engine.uptime) : 'Aucun flux actif'}
+          sub={
+            engine.running && engine.started_at
+              ? `Depuis ${formatUptime(streamSeconds)} · ${new Date(engine.started_at * 1000).toLocaleTimeString('fr-FR')}`
+              : 'Aucun flux actif'
+          }
           tone={engine.running ? 'live' : 'off'}
         />
       </div>

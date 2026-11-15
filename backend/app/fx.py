@@ -25,6 +25,72 @@ FONT_CANDIDATES = [
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
 ]
 
+# Directories scanned for selectable fonts (fontfile= in drawtext). Kept small
+# and read-only; a missing directory is simply skipped.
+FONT_DIRS = [
+    "/usr/share/fonts/truetype",
+    "/usr/share/fonts/TTF",
+    "/usr/share/fonts/opentype",
+    "/usr/local/share/fonts",
+]
+
+# A handful of fonts we always offer, labelled in French, mapped to a family
+# pattern searched in the font directories. `default` is used when nothing is set.
+FONT_CHOICES = [
+    {"id": "default", "label": "Par défaut (DejaVu Sans)", "pattern": "DejaVuSans.ttf"},
+    {"id": "sans", "label": "Sans-serif", "pattern": "DejaVuSans.ttf"},
+    {"id": "sans-bold", "label": "Sans-serif gras", "pattern": "DejaVuSans-Bold.ttf"},
+    {"id": "serif", "label": "Serif", "pattern": "DejaVuSerif.ttf"},
+    {"id": "serif-bold", "label": "Serif gras", "pattern": "DejaVuSerif-Bold.ttf"},
+    {"id": "mono", "label": "Monospace", "pattern": "DejaVuSansMono.ttf"},
+    {"id": "mono-bold", "label": "Monospace gras", "pattern": "DejaVuSansMono-Bold.ttf"},
+    {"id": "liberation-sans", "label": "Liberation Sans", "pattern": "LiberationSans-Regular.ttf"},
+    {"id": "liberation-serif", "label": "Liberation Serif", "pattern": "LiberationSerif-Regular.ttf"},
+    {"id": "noto-sans", "label": "Noto Sans", "pattern": "NotoSans-Regular.ttf"},
+    {"id": "ubuntu", "label": "Ubuntu", "pattern": "Ubuntu-R.ttf"},
+    {"id": "free-sans", "label": "FreeSans", "pattern": "FreeSans.ttf"},
+]
+
+
+def _iter_font_files():
+    from pathlib import Path
+
+    for directory in FONT_DIRS:
+        base = Path(directory)
+        if not base.exists():
+            continue
+        for path in base.rglob("*.ttf"):
+            yield path
+        for path in base.rglob("*.otf"):
+            yield path
+
+
+def resolve_font(font_id: str | None) -> str | None:
+    """Return the absolute path of a chosen font, or the default when unset.
+
+    `font_id` matches FONT_CHOICES; an unknown id falls back to the default. If
+    nothing is found on disk, returns None so drawtext uses its own default.
+    """
+    if font_id and font_id != "default":
+        for choice in FONT_CHOICES:
+            if choice["id"] == font_id:
+                pattern = choice["pattern"].lower()
+                for path in _iter_font_files():
+                    if path.name.lower() == pattern:
+                        return str(path)
+                break
+    return font_path()
+
+
+def font_catalog() -> list[dict[str, str]]:
+    """Only expose the fonts that are actually present on this host."""
+    present: list[dict[str, str]] = []
+    available = {p.name.lower() for p in _iter_font_files()}
+    for choice in FONT_CHOICES:
+        if choice["id"] == "default" or choice["pattern"].lower() in available:
+            present.append({"id": choice["id"], "label": choice["label"]})
+    return present or [{"id": "default", "label": "Par défaut (DejaVu Sans)"}]
+
 
 def font_path() -> str | None:
     from pathlib import Path
@@ -177,8 +243,10 @@ def _loop_exprs(kind: str, x: float, y: float, speed: Any, duration: float) -> d
     """Loop animation, applied between the in and out animations."""
     bx, by = str(int(x)), str(int(y))
     if kind == "marquee":
+        # One pass only: the text enters from the right and crosses the frame
+        # once, then stops off-screen (a repeated scroll looked like spam).
         v = int(_float(speed, _float(LOOP_ANIMATIONS["marquee"]["speed_default"], 80)))
-        return {"x": f"w-mod(t*{v}\\,w+tw)", "y": by, "alpha": "1"}
+        return {"x": f"w-min(t*{v}\\,w+tw)", "y": by, "alpha": "1"}
     if kind == "blink":
         v = _float(speed, _float(LOOP_ANIMATIONS["blink"]["speed_default"], 1.5))
         period = max(1.0 / v, 0.05) * 2
@@ -197,8 +265,37 @@ def _loop_exprs(kind: str, x: float, y: float, speed: Any, duration: float) -> d
     if kind == "pulse_size":
         return {"x": bx, "y": by, "alpha": f"0.6+0.4*(1+sin(2*PI*{_float(speed, 0.8):.3f}*t))/2"}
     if kind == "rainbow":
+        # Handled by a dedicated animated border (see rainbow_border); no
+        # position/alpha change here so the text itself stays put and its colour
+        # is untouched (only the frame cycles).
         return {"x": bx, "y": by, "alpha": "1"}
     return {"x": bx, "y": by, "alpha": "1"}
+
+
+# Colours cycled by the "rainbow" loop, applied to a border box (never the text).
+RAINBOW_COLORS = ["0xff0040", "0xff8a00", "0xffe600", "0x33cc33", "0x00b3ff", "0x8a2be2"]
+
+
+def rainbow_border(x: int, y: int, w: int, h: int, speed: Any, thickness: int = 5) -> list[str]:
+    """drawbox filters cycling a coloured border around a layer.
+
+    drawbox has no colour expression, so we emit one box per colour, each enabled
+    during its own slice of the cycle (enable='between(mod(t,P), a, b)').
+    """
+    if w <= 0 or h <= 0:
+        return []
+    v = _float(speed, 0.5)
+    period = max(1.0 / max(v, 0.05), 0.4)
+    step = period / len(RAINBOW_COLORS)
+    filters: list[str] = []
+    for i, color in enumerate(RAINBOW_COLORS):
+        a = i * step
+        b = (i + 1) * step
+        filters.append(
+            f"drawbox=x={x}:y={y}:w={w}:h={h}:color={color}@{0.9}:t={thickness}"
+            f":enable='between(mod(t\\,{period:.3f})\\,{a:.3f}\\,{b:.3f})'"
+        )
+    return filters
 
 
 def layer_motion(

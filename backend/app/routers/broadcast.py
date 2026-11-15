@@ -290,10 +290,17 @@ class TakePayload(BaseModel):
 
 @router.post("/take")
 def take(payload: TakePayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
-    """Take a playlist to air (preview -> program)."""
+    """Take a playlist to air (preview -> program).
+
+    This is a switch only: it never starts the broadcast. If the live is stopped,
+    it is refused so the operator starts it explicitly.
+    """
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
-    result = get_engine().switch_playlist(payload.playlist_id)
+    engine = get_engine()
+    if not engine.status().get("running"):
+        raise HTTPException(status_code=409, detail="Le direct est arrêté. Démarrez-le pour prendre l'antenne.")
+    result = engine.switch_playlist(payload.playlist_id)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "Échec de la prise d'antenne"))
     return result

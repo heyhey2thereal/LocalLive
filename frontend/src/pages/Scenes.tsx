@@ -39,9 +39,11 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
             ? 'Bandeau d’actualités'
             : null,
     font_size: type === 'text' ? 64 : type === 'countdown' ? 96 : type === 'clock' ? 72 : type === 'ticker' ? 40 : type === 'chat' ? 28 : 36,
+    font: 'default',
     color: '#ffffff',
-    background:
-      type === 'overlay' || type === 'chat' || type === 'countdown' || type === 'ticker' ? '#000000' : null,
+    // Countdown and clock are just numbers/text: no black box behind them by
+    // default (only the explicit "Bandeau"/"Chat" layers get a background).
+    background: type === 'overlay' || type === 'chat' || type === 'ticker' ? '#000000' : null,
     media_id: null,
     animation: 'none',
     anim_in: 'none',
@@ -878,6 +880,20 @@ export default function Scenes() {
                 </div>
                 {(layer.type === 'text' || layer.type === 'overlay') && (
                   <>
+                    <div className="field">
+                      <label>Police</label>
+                      <select
+                        className="select"
+                        value={layer.font ?? 'default'}
+                        onChange={(e) => updateLayer(selectedLayer!, { font: e.target.value })}
+                      >
+                        {(catalog?.fonts ?? [{ id: 'default', label: 'Par défaut' }]).map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <div className="field">
                       <label>Taille de police</label>
                       <input

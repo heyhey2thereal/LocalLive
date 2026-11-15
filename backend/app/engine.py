@@ -796,6 +796,8 @@ class PlaybackEngine:
         )
         color = fx.hex_to_ffmpeg(layer.get("color") or "#ffffff")
         boxcolor = fx.hex_to_ffmpeg(str(layer.get("background") or "#000000"))
+        # Per-layer font selection (falls back to the default when unset).
+        layer_font = fx.resolve_font(layer.get("font")) or font
 
         def draw_text(text: str, fontsize: int, *, box: bool, spacing: int = 0) -> str:
             arg = f"'{fx.escape_drawtext(text)}'"
@@ -807,17 +809,29 @@ class PlaybackEngine:
             )
             if spacing:
                 dt += f":line_spacing={spacing}"
-            if font:
-                dt += f":fontfile={font}"
+            if layer_font:
+                dt += f":fontfile={layer_font}"
             if box:
                 dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=10"
             return dt
+
+        # A coloured border cycling through the rainbow, only when the layer
+        # loops with the "rainbow" animation. It draws around the layer box and
+        # never recolours the text itself.
+        def rainbow_suffix() -> str:
+            if (layer.get("anim_loop") or "none") != "rainbow":
+                return ""
+            bw = int(layer.get("width") or 0)
+            bh = int(layer.get("height") or 0)
+            boxes = fx.rainbow_border(x, y, bw, bh, speed)
+            return ("," + ",".join(boxes)) if boxes else ""
 
         if ltype in ("text", "overlay"):
             if not layer.get("text"):
                 return False
             fontsize = int(layer.get("font_size", 48 if ltype == "text" else 36))
-            filters.append(f"{src}{draw_text(str(layer['text']), fontsize, box=bool(layer.get('background')))}{out_label}")
+            chain = draw_text(str(layer['text']), fontsize, box=bool(layer.get('background'))) + rainbow_suffix()
+            filters.append(f"{src}{chain}{out_label}")
             return True
 
         if ltype == "countdown":
@@ -840,12 +854,12 @@ class PlaybackEngine:
                 f"drawtext=text='{expr}':x={prs['x']}:y={prs['y']}:"
                 f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
             )
-            if font:
-                dt += f":fontfile={font}"
-            # A background box only when the layer explicitly asks for one.
+            if layer_font:
+                dt += f":fontfile={layer_font}"
+            # No background box unless the layer explicitly asks for one.
             if layer.get("background"):
                 dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
-            filters.append(f"{src}{dt}{out_label}")
+            filters.append(f"{src}{dt}{rainbow_suffix()}{out_label}")
             return True
 
         if ltype == "chat":
@@ -871,11 +885,11 @@ class PlaybackEngine:
                 f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:"
                 f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
             )
-            if font:
-                dt += f":fontfile={font}"
+            if layer_font:
+                dt += f":fontfile={layer_font}"
             if layer.get("background"):
                 dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
-            filters.append(f"{src}{dt}{out_label}")
+            filters.append(f"{src}{dt}{rainbow_suffix()}{out_label}")
             return True
 
         if ltype == "ticker":
@@ -958,6 +972,7 @@ def _mask(value: str) -> str:
 
 
 def _public_item(item: dict[str, Any]) -> dict[str, Any]:
+    bg_id = item.get("background_audio_id")
     return {
         "id": item.get("id"),
         "media_id": item.get("media_id"),
@@ -967,6 +982,11 @@ def _public_item(item: dict[str, Any]) -> dict[str, Any]:
         "duration": round(item.get("duration") or 0, 2),
         "thumbnail": f"/api/media/{item['media_id']}/thumbnail" if item.get("media_id") else None,
         "stream_url": f"/api/media/{item['media_id']}/stream" if item.get("media_id") else None,
+        # Background music of the item (if any) so the operator's monitor can
+        # play it in full screen; it is mixed under the item on air.
+        "background_audio_id": bg_id,
+        "background_audio_url": f"/api/media/{bg_id}/stream" if bg_id else None,
+        "background_volume": float(item.get("background_volume") or 0),
         "exists": bool(item.get("exists")),
     }
 

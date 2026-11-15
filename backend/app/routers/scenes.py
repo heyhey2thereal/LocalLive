@@ -37,6 +37,7 @@ class Layer(BaseModel):
     media_id: int | None = None
     text: str | None = None
     font_size: int = 48
+    font: str = "default"
     color: str = "#ffffff"
     background: str | None = None
     align: str = "left"

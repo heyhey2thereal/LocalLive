@@ -3,6 +3,30 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.10.0] — 2026-11-14
+
+### Corrigé
+- **Prise d'antenne** : la flèche (aperçu → programme) ne **démarre plus** le
+  direct. Si le direct est arrêté, la prise d'antenne est refusée et il faut
+  cliquer sur « Démarrer le direct ». `POST /api/broadcast/take` ne lance plus
+  le moteur.
+- **Compte à rebours** : plus de **fond noir** par défaut (il ne reste que si on
+  le demande explicitement).
+- **Défilement (marquee)** : le texte traverse le cadre **une seule fois** (fini
+  l'effet « spam » qui recommençait en boucle).
+- **Animation « Couleurs » (rainbow)** : elle fait défiler la couleur d'un
+  **cadre** autour de l'élément — le **texte** n'est plus recoloré.
+- **Polices** : un sélecteur de police apparaît sur les calques texte/bandeau
+  (par défaut, sans, sans gras, serif, serif gras, monospace, monospace gras…).
+  Seules les polices réellement installées sont proposées.
+- **Compte à rebours synchronisé** : l'aperçu ne prend plus d'avance sur le
+  programme — le décompte du programme suit le temps réel de diffusion, celui de
+  l'aperçu reste figé sur la valeur de départ.
+
+### Ajouté
+- **Minuteur de direct** : durée écoulée affichée sur le moniteur Programme et
+  sur le Tableau de bord (« Depuis 1h 23m », heure de début).
+
 ## [2.9.0] — 2026-11-14
 
 ### Corrigé

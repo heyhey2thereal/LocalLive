@@ -50,6 +50,16 @@ export default function ProgramWindow() {
   const program = poll.data?.program
   const preview = poll.data?.preview
   const item = view === 'program' ? program?.current ?? null : preview?.items[0] ?? null
+  // Elapsed seconds of the current program item (drives the countdown), so the
+  // detached window matches the switcher.
+  const programElapsed =
+    program && program.current_index >= 0
+      ? Math.max(
+          0,
+          program.position -
+            program.items.slice(0, program.current_index).reduce((s, it) => s + (it.duration || 0), 0),
+        )
+      : 0
 
   // Fit the 16:9 render inside the window; no margin in full-screen.
   const pad = fullscreen ? 0 : 24
@@ -78,7 +88,7 @@ export default function ProgramWindow() {
         </div>
       )}
       <div className="program-window-stage">
-        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} sound={soundEnabled} animate />
+        <ProgramPreview item={item} emptyLabel="Rien à afficher" width={width} sound={soundEnabled} animate elapsed={view === 'program' ? programElapsed : null} />
       </div>
     </div>
   )
