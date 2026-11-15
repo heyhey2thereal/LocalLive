@@ -188,6 +188,29 @@ class PlaybackEngine:
             self._terminate_process()  # supervisor restarts with new items
             return {"ok": True}
 
+    def set_program(self, playlist_id: int) -> dict[str, Any]:
+        """Record which playlist is on air *without starting the broadcast*.
+
+        Used by a take while the live is stopped: the program monitor then shows
+        the chosen playlist, so the operator can line up the programme before
+        pressing "Démarrer le direct". Nothing is streamed.
+        """
+        with self._lock:
+            playlist = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+            if not playlist:
+                return {"ok": False, "error": "Playlist introuvable"}
+            items = self._resolve_items(playlist_id)
+            if not items:
+                return {"ok": False, "error": "La playlist est vide"}
+            self._state.playlist_id = playlist_id
+            self._state.playlist_name = playlist["name"]
+            self._state.items = [_public_item(i) for i in items]
+            self._state.cycle_duration = sum(i["duration"] for i in items)
+            self._state.current_index = 0
+            self._state.position = 0.0
+            self._desired = {"playlist_id": playlist_id, "items": items}
+            return {"ok": True}
+
     def skip(self, direction: int = 1) -> dict[str, Any]:
         """Jump to the next (direction>0) or previous item immediately.
 

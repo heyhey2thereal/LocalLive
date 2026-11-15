@@ -376,19 +376,24 @@ def countdown(payload: CountdownPayload, user: dict = Depends(require(permission
 def take(payload: TakePayload, user: dict = Depends(require(permissions.CAP_BROADCAST))) -> dict[str, Any]:
     """Take a playlist to air (preview -> program).
 
-    This is a switch only: it never starts the broadcast. When the live is
-    stopped there is nothing to switch, so it is a silent no-op (no error, no
-    start) — the operator is not told to start the stream first.
+    This is a switch only: it **never starts the broadcast**. When the live is
+    already running the playlist is swapped on air; when it is stopped the
+    programme is still switched (the program monitor shows the chosen playlist)
+    but nothing is streamed, so the operator can line up the programme before
+    pressing "Démarrer le direct".
     """
     if not db.query_one("SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
     engine = get_engine()
-    if not engine.status().get("running"):
-        return {"ok": True, "switched": False}
-    result = engine.switch_playlist(payload.playlist_id)
+    if engine.status().get("running"):
+        result = engine.switch_playlist(payload.playlist_id)
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("error", "Échec de la prise d'antenne"))
+        return {"ok": True, "switched": True, "live": True, **result}
+    result = engine.set_program(payload.playlist_id)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "Échec de la prise d'antenne"))
-    return {"ok": True, "switched": True, **result}
+    return {"ok": True, "switched": True, "live": False}
 
 
 @router.post("/recover")

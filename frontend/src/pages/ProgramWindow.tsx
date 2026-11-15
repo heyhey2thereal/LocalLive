@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type PreviewData } from '../api'
 import { usePoll } from '../lib/usePoll'
 import ProgramPreview from '../components/ProgramPreview'
+import { setMonitorPageVisible } from '../lib/monitorSound'
 
 export default function ProgramWindow() {
   const params = new URLSearchParams(window.location.search)
@@ -18,6 +19,13 @@ export default function ProgramWindow() {
   const [fullscreen, setFullscreen] = useState(false)
   const [soundEnabled, setSoundEnabled] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // This window is the broadcast page for the shared sound element: make it
+  // audible while it is shown and mute it (never stop it) when it is closed.
+  useEffect(() => {
+    setMonitorPageVisible(true)
+    return () => setMonitorPageVisible(false)
+  }, [])
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight })

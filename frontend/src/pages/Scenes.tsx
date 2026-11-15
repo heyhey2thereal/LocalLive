@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Catalog, type LayerType, type Media, type Scene, type SceneLayer } from '../api'
 import SceneCanvas from '../components/SceneCanvas'
 import { SceneThumb } from '../components/ProgramPreview'
@@ -74,6 +74,12 @@ export default function Scenes() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Scene | null>(null)
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null)
+  // Layer row under the pointer in the list: previews its animation once on the
+  // canvas, so the operator can see the motion without opening a preview.
+  const [hoveredLayer, setHoveredLayer] = useState<number | null>(null)
+  // Layer briefly previewed after its animation changed (one-shot auto-preview).
+  const [autoPreview, setAutoPreview] = useState<number | null>(null)
+  const autoPreviewTimer = useRef<number | null>(null)
   const [toDelete, setToDelete] = useState<Scene | null>(null)
   const [fullscreenMedia, setFullscreenMedia] = useState<Media | null>(null)
 
@@ -151,6 +157,20 @@ export default function Scenes() {
   const updateLayer = (index: number, patch: Partial<SceneLayer>) => {
     if (!editing) return
     setLayers(editing.layers.map((l, i) => (i === index ? { ...l, ...patch } : l)))
+    // When the animation of the selected layer changes, play it once on the
+    // canvas so the operator immediately sees the motion they just chose.
+    if (['anim_in', 'anim_loop', 'anim_out', 'animation_speed', 'animation'].some((k) => k in patch)) {
+      previewLayerOnce(index)
+    }
+  }
+
+  // Briefly preview a layer's animation on the canvas (one-shot), then return to
+  // the static state. `autoPreview` drives the canvas; `hoveredLayer` (list rows)
+  // is combined with it.
+  const previewLayerOnce = (index: number) => {
+    setAutoPreview(index)
+    if (autoPreviewTimer.current) window.clearTimeout(autoPreviewTimer.current)
+    autoPreviewTimer.current = window.setTimeout(() => setAutoPreview(null), 1400)
   }
 
   const removeLayer = (index: number) => {
@@ -407,6 +427,7 @@ export default function Scenes() {
                 mediaFor={mediaFor}
                 onSelect={setSelectedLayer}
                 onChange={setLayers}
+                previewIndex={hoveredLayer ?? autoPreview}
               />
             </div>
 
@@ -417,6 +438,8 @@ export default function Scenes() {
                   key={i}
                   className={`row ${selectedLayer === i ? 'drag-over' : ''}`}
                   onClick={() => setSelectedLayer(i)}
+                  onMouseEnter={() => setHoveredLayer(i)}
+                  onMouseLeave={() => setHoveredLayer((h) => (h === i ? null : h))}
                   style={{ cursor: 'pointer' }}
                 >
                   <div className="row-main">

@@ -13,7 +13,7 @@ import { formatDuration, formatUptime, Loading, Modal, useToast } from '../compo
 import { IconArrowRight, IconMusic, IconPlay, IconStop } from '../components/icons'
 import {
   monitorAudioUrl,
-  monitorAudioVolume,
+  setMonitorPageVisible,
   subscribeMonitorSound,
   toggleMonitorSound,
 } from '../lib/monitorSound'
@@ -125,12 +125,15 @@ export default function PreviewProgram() {
   const running = Boolean(program?.running)
 
   // Monitor sound of the preview: a single shared audio element (monitorSound)
-  // so it keeps playing while the operator moves between pages.
+  // so it keeps playing while the operator moves between pages. It is only
+  // *audible* on this page: leaving mutes it (without stopping), returning makes
+  // it audible again instantly.
   const [previewSoundOn, setPreviewSoundOn] = useState(false)
-  useEffect(
-    () => subscribeMonitorSound((st) => setPreviewSoundOn(st.source === 'preview')),
-    [],
-  )
+  useEffect(() => subscribeMonitorSound((st) => setPreviewSoundOn(st.source === 'preview')), [])
+  useEffect(() => {
+    setMonitorPageVisible(true)
+    return () => setMonitorPageVisible(false)
+  }, [])
   const previewAudio = monitorAudioUrl(previewItem)
 
   // Seconds the *current program item* has been playing: total position minus
@@ -164,10 +167,9 @@ export default function PreviewProgram() {
     txTimer.current = window.setTimeout(() => setTxClass(''), 900)
   }
 
-  // Take the preview to air: swap preview/program WITHOUT starting the live.
-  // The broadcast is started only by the explicit "Démarrer le direct" button.
-  // When the live is stopped the backend does nothing (silent no-op) and we
-  // simply leave the monitors as they are.
+  // Take the preview to air. When the live is running the playlist is swapped on
+  // air; when it is stopped the programme is still switched (the program monitor
+  // shows the chosen playlist) but nothing is streamed.
   const swap = async () => {
     if (!target) {
       push({ kind: 'err', title: 'Choisissez d’abord une playlist dans l’aperçu' })
@@ -176,16 +178,17 @@ export default function PreviewProgram() {
     setBusy(true)
     const previousProgram = program?.playlist_id ?? null
     try {
-      const res = await api.post<{ ok: boolean; switched?: boolean }>('/api/broadcast/take', {
-        playlist_id: target,
-      })
-      if (res.switched === false) {
-        // Live stopped: nothing to switch, no message (the operator was not
-        // asked to start the stream).
-        return
-      }
+      const res = await api.post<{ ok: boolean; switched?: boolean; live?: boolean }>(
+        '/api/broadcast/take',
+        { playlist_id: target },
+      )
+      if (res.switched === false) return
       playTransition()
-      push({ kind: 'ok', title: 'Prise d’antenne effectuée' })
+      push({
+        kind: 'ok',
+        title: 'Prise d’antenne effectuée',
+        ...(res.live === false ? { message: 'Le direct est arrêté : cliquez sur « Démarrer le direct » pour diffuser.' } : {}),
+      })
       setSelectedId(previousProgram ?? '')
       poll.refresh()
     } catch (err: any) {
@@ -310,9 +313,7 @@ export default function PreviewProgram() {
               className={`btn btn-sm ${previewSoundOn ? 'btn-primary' : ''}`}
               disabled={!previewAudio}
               title={previewSoundOn ? 'Couper le son du moniteur' : 'Écouter le son du moniteur'}
-              onClick={() =>
-                toggleMonitorSound(previewAudio, monitorAudioVolume(previewItem), 'preview')
-              }
+              onClick={() => toggleMonitorSound('preview', previewItem)}
             >
               <IconMusic size={15} /> {previewSoundOn ? 'Son' : 'Muet'}
             </button>
@@ -340,7 +341,6 @@ export default function PreviewProgram() {
             emptyLabel="La diffusion est à l'arrêt"
             width={520}
             soundSource="program"
-            sound
             reloadKey={reloadKey}
             animate
             elapsed={running ? programElapsed : null}

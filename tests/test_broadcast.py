@@ -83,8 +83,8 @@ def test_broadcast_start_without_playlist_fails(authed):
 
 def test_take_does_not_start_broadcast(authed, tmp_path):
     # A take is a switch only: it must never start the live. When the broadcast
-    # is stopped there is nothing to switch, so it is a silent no-op (no error,
-    # no start).
+    # is stopped the programme is still switched (so the program monitor shows
+    # the chosen playlist) but nothing is streamed.
     pid = _setup_playlist(authed, tmp_path)
     authed.put("/api/broadcast/settings", json={
         "output_kind": "file",
@@ -94,8 +94,12 @@ def test_take_does_not_start_broadcast(authed, tmp_path):
     assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
     r = authed.post("/api/broadcast/take", json={"playlist_id": pid})
     assert r.status_code == 200, r.text
-    assert r.json() == {"ok": True, "switched": False}
-    assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
+    body = r.json()
+    assert body["switched"] is True and body["live"] is False
+    # The programme is lined up but the live did NOT start.
+    status = authed.get("/api/broadcast/status").json()["engine"]
+    assert status["running"] is False
+    assert status["playlist_id"] == pid
 
 
 def test_take_switches_when_running(authed, tmp_path):
@@ -220,3 +224,23 @@ def test_countdown_controls_apply_while_running(authed, tmp_path):
 def test_engine_is_independent_singleton():
     # The engine is a process-wide singleton, independent of the web layer.
     assert get_engine() is get_engine()
+
+
+def test_take_empty_playlist_while_stopped_is_rejected(authed, tmp_path):
+    # A take onto an empty playlist cannot line up a programme: clear 409.
+    empty = authed.post("/api/playlists", json={"name": "Vide"}).json()["id"]
+    assert authed.get("/api/broadcast/status").json()["engine"]["running"] is False
+    r = authed.post("/api/broadcast/take", json={"playlist_id": empty})
+    assert r.status_code == 409, r.text
+
+
+def test_take_while_stopped_lines_up_the_programme(authed, tmp_path):
+    # The programme is switched (program monitor shows the playlist) but the live
+    # is NOT started.
+    pid = _setup_playlist(authed, tmp_path)
+    r = authed.post("/api/broadcast/take", json={"playlist_id": pid})
+    assert r.status_code == 200, r.text
+    assert r.json()["switched"] is True and r.json()["live"] is False
+    preview = authed.get("/api/broadcast/preview").json()
+    assert preview["program"]["playlist_id"] == pid
+    assert preview["program"]["running"] is False

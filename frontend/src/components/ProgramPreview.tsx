@@ -14,15 +14,17 @@ import type { EngineItem, Media, Scene, SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
 import { fontFamily, fontWeight } from '../lib/fonts'
 import {
-  isMonitorSoundActive,
+  followMonitorSound,
+  isMonitorSoundSelected,
   monitorAudioUrl,
   monitorAudioVolume,
-  playMonitorSound,
+  requestMonitorSound,
   subscribeMonitorSound,
-  syncMonitorSound,
   toggleMonitorSound,
+  type MonitorSource,
 } from '../lib/monitorSound'
 import { IconMusic } from './icons'
+import { Spinner } from './ui'
 
 interface SceneLike {
   width: number
@@ -301,7 +303,6 @@ export function SceneThumb({
 function MediaRender({
   item,
   width,
-  sound,
   soundSource,
   reloadKey,
   animate,
@@ -309,8 +310,7 @@ function MediaRender({
 }: {
   item: EngineItem
   width: number
-  sound: boolean
-  soundSource: string
+  soundSource: MonitorSource
   reloadKey?: string | number
   animate: boolean
   elapsed?: number | null
@@ -345,17 +345,32 @@ function MediaRender({
 
   // The monitor's sound is played by the shared element (monitorSound.ts), not
   // by an <audio> inside this component, so it keeps playing when the operator
-  // leaves the page. `sound` only turns it on; turning it off is explicit (the
-  // speaker button) so navigating away does not cut it.
+  // leaves the page. This keeps the element in step with the current item.
   const audioUrl = monitorAudioUrl(item)
   const audioVolume = monitorAudioVolume(item)
   useEffect(() => {
-    if (!sound) return
-    syncMonitorSound(audioUrl, audioVolume, soundSource)
-  }, [sound, audioUrl, audioVolume, soundSource])
+    followMonitorSound(soundSource, item)
+  }, [soundSource, item, audioUrl, audioVolume])
 
   if (item.scene_id) {
-    if (!ready || !scene) return <div className="stage-empty">Chargement…</div>
+    // A visible loader (spinner + label) instead of a black box, so a slow load
+    // never looks like a dead/black screen.
+    if (!ready) {
+      return (
+        <div className="stage-empty stage-loading">
+          <Spinner large />
+          <span>Chargement de la scène…</span>
+        </div>
+      )
+    }
+    if (!scene) {
+      return (
+        <div className="stage-empty stage-loading">
+          <span>Scène indisponible</span>
+          <span className="text-sm muted-2">Vérifiez la connexion au serveur.</span>
+        </div>
+      )
+    }
     return (
       <FitScene
         scene={scene}
@@ -394,9 +409,10 @@ interface Props {
   item: EngineItem | null
   emptyLabel: string
   width: number
+  /** Ask for this monitor's sound on mount (program monitor, detached window). */
   sound?: boolean
-  /** Identity of this monitor for the shared sound element (default "monitor"). */
-  soundSource?: string
+  /** Identity of this monitor for the shared sound element (default "preview"). */
+  soundSource?: MonitorSource
   reloadKey?: string | number
   /** Play the scene layers' IN/LOOP/OUT animations (monitors). */
   animate?: boolean
@@ -409,24 +425,25 @@ export default function ProgramPreview({
   emptyLabel,
   width,
   sound = false,
-  soundSource = 'monitor',
+  soundSource = 'preview',
   reloadKey,
   animate = false,
   elapsed = null,
 }: Props) {
   const tileRef = useRef<HTMLDivElement>(null)
-  // Whether this monitor owns the shared sound element. It is the module state
-  // (not a local flag) so the sound survives page changes.
+  // Whether this monitor is the one the operator selected to hear. It is the
+  // module state (not a local flag) so the sound survives page changes.
   const [soundOn, setSoundOn] = useState(false)
-  useEffect(() => subscribeMonitorSound((st) => setSoundOn(st.source === soundSource)), [soundSource])
-  // `sound` asks to start this monitor's sound on mount (the program monitor,
-  // the detached window). Idempotent: never turns an already-on sound off, so a
-  // remount (page change) does not interrupt it.
+  useEffect(
+    () => subscribeMonitorSound((st) => setSoundOn(st.source === soundSource && st.enabled)),
+    [soundSource],
+  )
+  // `sound` asks to select this monitor on mount. Idempotent: it never turns an
+  // already-selected monitor off, so a page remount does not interrupt it.
   useEffect(() => {
     if (!sound) return
-    const url = monitorAudioUrl(item)
-    if (url && !isMonitorSoundActive(soundSource)) {
-      playMonitorSound(url, monitorAudioVolume(item), soundSource)
+    if (monitorAudioUrl(item) && !isMonitorSoundSelected(soundSource)) {
+      requestMonitorSound(soundSource, item)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sound, soundSource])
@@ -446,7 +463,6 @@ export default function ProgramPreview({
       <MediaRender
         item={item}
         width={width}
-        sound={soundOn}
         soundSource={soundSource}
         reloadKey={reloadKey}
         animate={animate}
@@ -457,7 +473,7 @@ export default function ProgramPreview({
           className="program-fullscreen"
           style={{ right: 44 }}
           title={soundOn ? 'Couper le son du moniteur' : 'Activer le son du moniteur'}
-          onClick={() => toggleMonitorSound(audioUrl, monitorAudioVolume(item), soundSource)}
+          onClick={() => toggleMonitorSound(soundSource, item)}
         >
           <IconMusic size={15} />
         </button>
@@ -467,7 +483,7 @@ export default function ProgramPreview({
         title="Plein écran (avec son)"
         onClick={() => {
           if (!soundOn && audioUrl) {
-            toggleMonitorSound(audioUrl, monitorAudioVolume(item), soundSource)
+            requestMonitorSound(soundSource, item)
           }
           if (document.fullscreenElement) void document.exitFullscreen()
           else void tileRef.current?.requestFullscreen?.()

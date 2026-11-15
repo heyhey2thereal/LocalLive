@@ -50,6 +50,8 @@ interface Props {
   mediaFor: (id?: number | null) => MediaInfo | undefined
   onSelect: (index: number | null) => void
   onChange: (layers: SceneLayer[]) => void
+  /** Layer index to preview once (hovered in the layers list), or null. */
+  previewIndex?: number | null
 }
 
 interface Guides {
@@ -71,6 +73,7 @@ export default function SceneCanvas({
   mediaFor,
   onSelect,
   onChange,
+  previewIndex = null,
 }: Props) {
   const scale = displayWidth / width
   const layerRefs = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -78,6 +81,9 @@ export default function SceneCanvas({
   // Layer currently under the pointer: it gets an outline and plays its
   // animations once (a quick preview of the motion).
   const [hovered, setHovered] = useState<number | null>(null)
+  // True while a layer is being dragged/resized; the hover preview is suppressed
+  // so the animation does not fight the live drag.
+  const [dragging, setDragging] = useState(false)
   const drag = useRef<{
     index: number
     handle: Handle | 'move'
@@ -210,6 +216,8 @@ export default function SceneCanvas({
   const startDrag = (e: React.MouseEvent, index: number, handle: Handle | 'move') => {
     e.stopPropagation()
     onSelect(index)
+    setDragging(true)
+    setHovered(null)
     const layer = layers[index]
     const isText = layer.type === 'text' || layer.type === 'overlay'
     const el = layerRefs.current.get(index)
@@ -300,6 +308,7 @@ export default function SceneCanvas({
     }
     const onUp = () => {
       drag.current = null
+      setDragging(false)
       if (raf) window.cancelAnimationFrame(raf)
       setGuides({ v: [], h: [] })
       window.removeEventListener('mousemove', onMove)
@@ -348,18 +357,18 @@ export default function SceneCanvas({
             const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
             lh = Math.round(lw * ratio)
           }
-          // The selected layer stays static (so it can be moved/edited); every
-          // other layer previews its motion — looping by default, and once while
-          // the pointer is over it.
+          // Layers are static by default (opening a scene must not spam every
+          // animation). Hovering a layer — selected or not — plays its animation
+          // once, so the operator can preview the motion they just chose.
           const isSelected = selected === i
-          const isHovered = hovered === i
-          const anim = isSelected ? null : layerAnimation(l, 0, width * scale, true, isHovered)
-          const showAnim = anim && !isSelected
+          const isHovered = hovered === i || previewIndex === i
+          const anim = isHovered && !dragging ? layerAnimation(l, 0, width * scale, false, true) : null
+          const showAnim = Boolean(anim)
           // Remount the layer while it is hovered so the one-shot animation
           // starts from the beginning on every hover (a CSS animation does not
           // restart when only its iteration count changes). Layers without an
           // animation keep a stable key, so media never flickers.
-          const key = showAnim && isHovered ? `${i}-hover` : i
+          const key = showAnim ? `${i}-hover` : i
           return (
             <div
               key={key}
@@ -367,7 +376,7 @@ export default function SceneCanvas({
                 if (el) layerRefs.current.set(i, el)
                 else layerRefs.current.delete(i)
               }}
-              className={`scene-layer ${isSelected ? 'selected' : ''} ${isHovered && !isSelected ? 'hovered' : ''} ${showAnim ? anim.className : ''}`}
+              className={`scene-layer ${isSelected ? 'selected' : ''} ${isHovered && !isSelected ? 'hovered' : ''} ${showAnim && anim ? anim.className : ''}`}
               style={{
                 left: l.x * scale,
                 top: l.y * scale,
@@ -384,7 +393,7 @@ export default function SceneCanvas({
                 // (via --ll-rot), so we must not set it inline.
                 transform: !showAnim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
                 zIndex: (l.z ?? 0) + 1,
-                ...(showAnim ? anim.style : {}),
+                ...(showAnim && anim ? anim.style : {}),
               }}
               onMouseEnter={() => setHovered(i)}
               onMouseLeave={() => setHovered((h) => (h === i ? null : h))}

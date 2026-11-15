@@ -3,6 +3,29 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.13.1] — 2026-11-15
+
+### Corrigé
+- **Prise d'antenne** : la flèche aperçu → programme **fonctionne désormais même
+  quand le direct est arrêté**. Le programme est basculé (le moniteur Programme
+  affiche la playlist choisie) sans démarrer la diffusion ; un message rappelle
+  qu'il reste à cliquer sur « Démarrer le direct ». Auparavant la flèche ne
+  faisait rien tant que le direct n'était pas lancé.
+- **Aperçu des animations** : ouvrir une scène ne **rejoue plus en boucle**
+  toutes les animations (effet « spam »). Les calques sont statiques ; survoler
+  un calque (sur le canevas **ou** dans la liste) joue son animation **une seule
+  fois**. Choisir une animation (IN/LOOP/OUT, vitesse) la joue aussitôt une fois
+  pour la montrer.
+- **Son du moniteur** : refonte. Le son **ne redémarre plus** — couper puis
+  réactiver le son (bouton haut-parleur) **met en sourdine** sans arrêter la
+  lecture, et le son **reprend là où il en était**. Il continue de tourner en
+  arrière-plan : en quittant la page de diffusion il est **coupé (sourdine)**
+  mais **pas arrêté**, et on le réentend **instantanément** en revenant. La
+  sortie RTMP vers YouTube (son, texte et scènes) est inchangée et vérifiée.
+- **Écran noir au chargement** : quand une page aperçu met du temps à charger,
+  un **indicateur de chargement** (spinner + libellé) s'affiche au lieu d'un
+  écran noir ; un message clair apparaît si la scène est indisponible.
+
 ## [2.13.0] — 2026-11-15
 
 ### Corrigé
