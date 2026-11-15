@@ -145,10 +145,13 @@ def list_scenes(q: str | None = None, user: dict = Depends(current_user)) -> dic
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_scene(payload: ScenePayload, user: dict = Depends(require(permissions.CAP_SCENES))) -> dict[str, Any]:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     sid = db.execute(
         "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
         (
-            payload.name.strip(),
+            name,
             payload.width,
             payload.height,
             payload.background,
@@ -192,10 +195,13 @@ def update_scene(
 ) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM scenes WHERE id = ?", (scene_id,)):
         raise HTTPException(status_code=404, detail="Scène introuvable")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     db.execute(
         "UPDATE scenes SET name=?, width=?, height=?, background=?, layers=?, updated_at=datetime('now') WHERE id=?",
         (
-            payload.name.strip(),
+            name,
             payload.width,
             payload.height,
             payload.background,

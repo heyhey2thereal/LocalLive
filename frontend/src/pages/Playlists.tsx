@@ -171,7 +171,9 @@ export default function Playlists() {
     if (!selected || !settingsItem) return
     try {
       await api.patch(`/api/playlists/${selected.id}/items/${settingsItem.id}`, {
-        duration: settingsItem.duration || settingsItem.effective_duration,
+        // Keep the raw override (0 = "use the default"); substituting the
+        // effective duration would permanently pin the item to today's value.
+        duration: settingsItem.duration,
         transition: patch.transition ?? settingsItem.transition,
         transition_duration: patch.transition_duration ?? settingsItem.transition_duration,
         background_audio_id:

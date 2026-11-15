@@ -482,7 +482,25 @@ export default function Scenes() {
                   <select
                     className="select"
                     value={layer.type}
-                    onChange={(e) => updateLayer(selectedLayer!, { type: e.target.value as LayerType })}
+                    onChange={(e) => {
+                      const type = e.target.value as LayerType
+                      // Start from a clean, type-appropriate layer so fields that
+                      // belong to the old type (countdown_seconds, feed_url…) do
+                      // not linger and leak into the engine.
+                      const fresh = NEW_LAYER(type, layer.z ?? 0)
+                      updateLayer(selectedLayer!, {
+                        ...fresh,
+                        x: layer.x,
+                        y: layer.y,
+                        width: layer.width,
+                        height: layer.height,
+                        rotation: layer.rotation,
+                        opacity: layer.opacity,
+                        z: layer.z,
+                        visible: layer.visible,
+                        blur: layer.blur,
+                      })
+                    }}
                   >
                     <option value="text">Texte</option>
                     <option value="overlay">Bandeau</option>

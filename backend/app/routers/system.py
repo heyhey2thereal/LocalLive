@@ -40,6 +40,22 @@ def _normalize_repo(value: str) -> str:
     return text
 
 
+def _installed_version() -> str | None:
+    """Version written on disk (VERSION next to the app), or None."""
+    for candidate in (
+        config.FRONTEND_DIST.parent.parent / "VERSION",
+        config.DATA_DIR.parent / "VERSION",
+    ):
+        try:
+            if candidate.exists():
+                text = candidate.read_text(encoding="utf-8").strip()
+                if text:
+                    return text
+        except OSError:
+            continue
+    return None
+
+
 @router.get("/update/check")
 def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
     """Compare the running version with the latest published tag.
@@ -116,7 +132,10 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
     if proc.returncode == 0:
         # Remember the version that was just applied so the UI can show a short
         # "updated" notice exactly once, the next time someone opens the app.
-        db.set_setting("pending_update_notice", __version__)
+        # `__version__` is the *running* (old) version, so read the freshly
+        # written VERSION file instead of announcing the version we just left.
+        applied = _installed_version() or __version__
+        db.set_setting("pending_update_notice", applied)
         return {"ok": True, "output": (proc.stdout or "")[-2000:]}
     return {"ok": False, "error": (proc.stderr or proc.stdout or "Échec de la mise à jour")[-2000:]}
 

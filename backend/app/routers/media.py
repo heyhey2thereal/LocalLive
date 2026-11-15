@@ -130,14 +130,15 @@ async def upload(
 ) -> dict[str, Any]:
     require_installed()
     created: list[dict[str, Any]] = []
+    rejected: list[str] = []
     for upload in files:
         original = upload.filename or "media"
         kind = probe.kind_for_ext(os.path.splitext(original)[1])
         if not kind:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=f"Type de fichier non pris en charge : {original}",
-            )
+            # A batch import must not lose the good files because one is
+            # unsupported: skip it and report it (unless nothing at all is valid).
+            rejected.append(original)
+            continue
         unique = uuid.uuid4().hex[:12]
         safe = _safe_name(original)
         filename = f"{unique}_{safe}"
@@ -167,7 +168,12 @@ async def upload(
             probe.make_preview(dest, config.PREVIEWS_DIR / f"{media_id}-960.jpg", kind, duration)
         row = db.query_one("SELECT * FROM media WHERE id = ?", (media_id,))
         created.append(_row_to_media(row))
-    return {"items": created, "count": len(created)}
+    if rejected and not created:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Type de fichier non pris en charge : {', '.join(rejected)}",
+        )
+    return {"items": created, "count": len(created), "rejected": rejected}
 
 
 @router.get("/{media_id}")
@@ -232,6 +238,10 @@ def update_media(
         fields.append("title = ?")
         params.append(title)
     if payload.folder_id is not None:
+        # 0 / null clears the folder; anything else must exist, otherwise the
+        # foreign key would fail and surface as a 500.
+        if payload.folder_id and not db.query_one("SELECT id FROM folders WHERE id = ?", (payload.folder_id,)):
+            raise HTTPException(status_code=404, detail="Dossier introuvable")
         fields.append("folder_id = ?")
         params.append(payload.folder_id or None)
     if payload.category is not None:
@@ -276,7 +286,7 @@ def _remove_previews(media_id: int) -> None:
 
 
 @router.get("/{media_id}/thumbnail")
-def thumbnail(media_id: int) -> FileResponse:
+def thumbnail(media_id: int, user: dict = Depends(current_user)) -> FileResponse:
     row = db.query_one("SELECT thumbnail FROM media WHERE id = ?", (media_id,))
     if not row or not row["thumbnail"]:
         raise HTTPException(status_code=404, detail="Vignette introuvable")
@@ -287,7 +297,7 @@ def thumbnail(media_id: int) -> FileResponse:
 
 
 @router.get("/{media_id}/preview")
-def preview(media_id: int, w: int = 960):
+def preview(media_id: int, w: int = 960, user: dict = Depends(current_user)):
     """Medium-resolution JPEG (cached) used by the editor and the switcher.
 
     Generated on first request and kept under `previews/`; subsequent requests
@@ -320,11 +330,17 @@ def _range_stream(path: Path, request: Request, content_type: str) -> StreamingR
         match = re.match(r"bytes=(\d*)-(\d*)", range_header)
         if match:
             g1, g2 = match.group(1), match.group(2)
-            if g1:
-                start = int(g1)
-            if g2:
-                end = int(g2)
-            end = min(end, size - 1)
+            if not g1 and g2:
+                # Suffix range "bytes=-N": the LAST N bytes, not the first N.
+                length = int(g2)
+                start = max(size - length, 0)
+                end = size - 1
+            else:
+                if g1:
+                    start = int(g1)
+                if g2:
+                    end = int(g2)
+                end = min(end, size - 1)
             if start > end or start >= size:
                 raise HTTPException(status_code=416, detail="Plage invalide")
             status_code = 206

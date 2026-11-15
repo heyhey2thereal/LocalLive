@@ -67,7 +67,8 @@ def create_user(
 ) -> dict[str, Any]:
     if not payload.password:
         raise HTTPException(status_code=422, detail="Un mot de passe est requis")
-    if db.query_one("SELECT id FROM users WHERE username = ?", (payload.username,)):
+    username = payload.username.strip()
+    if db.query_one("SELECT id FROM users WHERE username = ?", (username,)):
         raise HTTPException(status_code=409, detail="Ce nom d'utilisateur existe déjà")
     try:
         pw_hash = security.hash_password(payload.password)
@@ -76,7 +77,7 @@ def create_user(
     uid = db.execute(
         "INSERT INTO users(username, password_hash, is_admin, role, permissions) VALUES(?,?,?,?,?)",
         (
-            payload.username.strip(),
+            username,
             pw_hash,
             1 if payload.role == "admin" else 0,
             payload.role,
@@ -96,10 +97,16 @@ def update_user(
     current_role = row["role"] or ("admin" if row["is_admin"] else "viewer")
     if current_role == "admin" and payload.role != "admin" and _admin_count() <= 1:
         raise HTTPException(status_code=409, detail="Impossible de rétrograder le dernier administrateur")
+    # A rename onto an existing username would violate the UNIQUE index and
+    # surface as a 500; report it cleanly instead.
+    username = payload.username.strip()
+    clash = db.query_one("SELECT id FROM users WHERE username = ? AND id != ?", (username, user_id))
+    if clash:
+        raise HTTPException(status_code=409, detail="Ce nom d'utilisateur existe déjà")
     db.execute(
         "UPDATE users SET username = ?, role = ?, is_admin = ?, permissions = ? WHERE id = ?",
         (
-            payload.username.strip(),
+            username,
             payload.role,
             1 if payload.role == "admin" else 0,
             json.dumps(payload.permissions),

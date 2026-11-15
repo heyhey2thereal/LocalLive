@@ -2,10 +2,20 @@
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from app import config, db, fx
 from app.engine import OutputConfig, PlaybackEngine
+from app.routers.schedules import active_playlist_id
+
+
+def _make_image(path: Path):
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "color=c=red:size=320x240:duration=1", "-frames:v", "1", str(path)],
+        check=True, timeout=60,
+    )
 
 
 def _make_video(path: Path, seconds: int = 1):
@@ -306,3 +316,157 @@ def test_reorder_moves_item(authed):
     swapped = [items[1]["id"], items[0]["id"]]
     res = authed.post(f"/api/playlists/{pid}/reorder", json={"item_ids": swapped}).json()
     assert [i["id"] for i in res["items"]] == swapped
+
+
+# --- regression tests: bug fixes (2.13.0) ----------------------------------
+
+def _audio(tmp_path, name="tone.mp3"):
+    p = tmp_path / name
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=2", str(p)],
+        check=True, timeout=60,
+    )
+    return p
+
+
+def test_duplicate_middle_item_does_not_collide(authed):
+    # Duplicating an item shifted the followers in one UPDATE, which tripped the
+    # UNIQUE(playlist_id, position) index and returned a 500.
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    for _ in range(4):
+        authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid, "duration": 5})
+    items = authed.get(f"/api/playlists/{pid}").json()["items"]
+    r = authed.post(f"/api/playlists/{pid}/items/{items[0]['id']}/duplicate", json={})
+    assert r.status_code == 201, r.text
+    positions = [i["position"] for i in r.json()["items"]]
+    assert positions == [0, 1, 2, 3, 4]
+
+
+def test_background_music_can_be_cleared(authed, tmp_path):
+    # PATCH with background_audio_id=null was ignored, so the music could never
+    # be removed once set.
+    a = _audio(tmp_path)
+    with a.open("rb") as fh:
+        mid = authed.post("/api/media/upload", files={"files": (a.name, fh, "audio/mpeg")}).json()["items"][0]["id"]
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    item = authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid}).json()["items"][0]
+    authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"background_audio_id": mid})
+    assert authed.get(f"/api/playlists/{pid}").json()["items"][0]["background_audio_id"] == mid
+    authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"background_audio_id": None})
+    assert authed.get(f"/api/playlists/{pid}").json()["items"][0]["background_audio_id"] is None
+
+
+def test_background_volume_zero_is_kept(authed):
+    # A volume of 0 (silence) was reported as the 0.15 default.
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    pid = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    item = authed.post(f"/api/playlists/{pid}/items", json={"scene_id": sid}).json()["items"][0]
+    authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"background_volume": 0})
+    assert authed.get(f"/api/playlists/{pid}").json()["items"][0]["background_volume"] == 0.0
+
+
+def test_stream_suffix_range_returns_tail(authed, tmp_path):
+    # "bytes=-N" means the LAST N bytes, not the first N.
+    v = tmp_path / "v.mp4"
+    _make_video(v)
+    with v.open("rb") as fh:
+        mid = authed.post("/api/media/upload", files={"files": (v.name, fh, "video/mp4")}).json()["items"][0]["id"]
+    size = int(authed.get(f"/api/media/{mid}/stream", headers={"Range": "bytes=0-0"}).headers["content-range"].split("/")[1])
+    r = authed.get(f"/api/media/{mid}/stream", headers={"Range": "bytes=-50"})
+    assert r.status_code == 206
+    assert len(r.content) == 50
+    assert r.headers["content-range"] == f"bytes {size - 50}-{size - 1}/{size}"
+
+
+def test_media_thumbnail_and_preview_require_auth(installed):
+    # Thumbnails and previews used to be served without any session, leaking the
+    # media library to anyone who could guess a media id.
+    assert installed.get("/api/media/1/thumbnail").status_code == 401
+    assert installed.get("/api/media/1/preview").status_code == 401
+
+
+def test_blank_names_are_rejected(authed):
+    assert authed.post("/api/playlists", json={"name": "   "}).status_code == 422
+    assert authed.post("/api/scenes", json={"name": "   ", "layers": []}).status_code == 422
+    assert authed.post("/api/streams", json={"name": "   "}).status_code == 422
+    assert authed.post("/api/schedules", json={"name": "   ", "start_time": "08:00", "end_time": "09:00"}).status_code == 422
+    # Updates must reject a blank name too (it used to be stored as "").
+    sc = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    assert authed.put(f"/api/scenes/{sc}", json={"name": "   ", "layers": []}).status_code == 422
+    pl = authed.post("/api/playlists", json={"name": "P"}).json()["id"]
+    assert authed.patch(f"/api/playlists/{pl}", json={"name": "   "}).status_code == 422
+
+
+def test_unknown_folder_is_rejected(authed, tmp_path):
+    # Moving a media to a missing folder raised a FK error (500).
+    v = tmp_path / "v.mp4"
+    _make_video(v)
+    with v.open("rb") as fh:
+        mid = authed.post("/api/media/upload", files={"files": (v.name, fh, "video/mp4")}).json()["items"][0]["id"]
+    assert authed.patch(f"/api/media/{mid}", json={"folder_id": 999}).status_code == 404
+
+
+def test_user_rename_collision_is_409(authed):
+    authed.post("/api/users", json={"username": "bob", "password": "SuperSecret123", "role": "viewer"})
+    u = authed.post("/api/users", json={"username": "carol", "password": "SuperSecret123", "role": "viewer"}).json()
+    r = authed.patch(f"/api/users/{u['id']}", json={"username": "bob", "role": "viewer", "permissions": []})
+    assert r.status_code == 409, r.text
+
+
+def test_batch_upload_keeps_valid_files(authed, tmp_path):
+    # One unsupported file used to abort the whole batch.
+    img = tmp_path / "ok.png"
+    _make_image(img)
+    bad = tmp_path / "note.txt"
+    bad.write_text("x")
+    with img.open("rb") as fh, bad.open("rb") as fh2:
+        r = authed.post(
+            "/api/media/upload",
+            files=[("files", (img.name, fh, "image/png")), ("files", (bad.name, fh2, "text/plain"))],
+        )
+    assert r.status_code == 201, r.text
+    assert r.json()["count"] == 1
+    assert r.json()["rejected"] == ["note.txt"]
+
+
+def test_fallback_playlist_cleared_with_zero(authed):
+    pid = authed.post("/api/playlists", json={"name": "F"}).json()["id"]
+    authed.put("/api/broadcast/settings", json={"fallback_playlist_id": pid})
+    assert active_playlist_id() == pid
+    authed.put("/api/broadcast/settings", json={"fallback_playlist_id": 0})
+    assert active_playlist_id() is None
+
+
+def test_overnight_schedule_matches_next_day(authed):
+    # A Monday 22:00 -> 02:00 window must also cover Tuesday 01:00.
+    pid = authed.post("/api/playlists", json={"name": "Nuit"}).json()["id"]
+    authed.post("/api/schedules", json={
+        "name": "Nuit", "playlist_id": pid, "days": [0],
+        "start_time": "22:00", "end_time": "02:00", "enabled": True,
+    })
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/Paris")
+    assert active_playlist_id(datetime(2026, 11, 16, 23, 0, tzinfo=tz)) == pid  # Monday
+    assert active_playlist_id(datetime(2026, 11, 17, 1, 0, tzinfo=tz)) == pid   # Tuesday
+    assert active_playlist_id(datetime(2026, 11, 17, 12, 0, tzinfo=tz)) is None  # Tuesday midday
+
+
+def test_audio_thumbnail_is_generated(authed, tmp_path):
+    # Grabbing a frame from an audio file produced no output, so audio media had
+    # no thumbnail at all. A waveform is rendered instead.
+    a = _audio(tmp_path)
+    with a.open("rb") as fh:
+        item = authed.post("/api/media/upload", files={"files": (a.name, fh, "audio/mpeg")}).json()["items"][0]
+    assert item["kind"] == "audio"
+    assert item["thumbnail_url"], "an audio file should still get a thumbnail"
+    assert authed.get(item["thumbnail_url"]).status_code == 200
+
+
+def test_user_create_strips_username(authed):
+    # The uniqueness check used the raw name while the insert stored a stripped
+    # one, so " bob" and "bob" could both be created.
+    assert authed.post("/api/users", json={"username": "  bob  ", "password": "SuperSecret123", "role": "viewer"}).json()["username"] == "bob"
+    assert authed.post("/api/users", json={"username": "bob", "password": "SuperSecret123", "role": "viewer"}).status_code == 409

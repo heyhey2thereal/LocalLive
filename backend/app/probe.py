@@ -113,11 +113,13 @@ def make_thumbnail(src: str | Path, dest: str | Path, kind: str, duration: float
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if kind == "audio":
+        # An audio file has no video stream, so a plain frame grab produces no
+        # output ("Output file does not contain any stream"). Render the waveform
+        # instead so the library still gets a real picture.
         cmd = [
             config.FFMPEG_BIN, "-y", "-v", "error",
             "-i", str(src),
-            "-an",
-            "-vf", "scale=320:-1:flags=fast_bilinear",
+            "-filter_complex", "showwavespic=s=320x180:colors=0x7cc0ff",
             "-frames:v", "1",
             str(dest),
         ]
@@ -149,10 +151,11 @@ def make_preview(src: str | Path, dest: str | Path, kind: str, duration: float, 
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if kind == "audio":
+        # Same as the thumbnail: audio needs a rendered waveform, not a frame grab.
         cmd = [
             config.FFMPEG_BIN, "-y", "-v", "error",
-            "-i", str(src), "-an",
-            "-vf", f"scale={width}:-1:flags=lanczos",
+            "-i", str(src),
+            "-filter_complex", f"showwavespic=s={width}x{round(width * 9 / 16)}:colors=0x7cc0ff",
             "-frames:v", "1", "-q:v", "3",
             str(dest),
         ]

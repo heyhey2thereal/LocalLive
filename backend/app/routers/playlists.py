@@ -81,7 +81,10 @@ def _load_items(playlist_id: int) -> list[dict[str, Any]]:
         d["effective_duration"] = round(effective, 3)
         d["transition"] = d.get("transition") or "cut"
         d["transition_duration"] = float(d.get("transition_duration") or 0)
-        d["background_volume"] = float(d.get("background_volume") or 0.15)
+        # 0 is a valid volume (silence); only an absent value falls back to
+        # the default. Using `or` here wrongly turned 0 into 0.15.
+        raw_volume = d.get("background_volume")
+        d["background_volume"] = 0.15 if raw_volume is None else float(raw_volume)
         if d["thumbnail"]:
             d["thumbnail_url"] = f"/api/media/{d['media_id']}/thumbnail"
         else:
@@ -114,9 +117,12 @@ def list_playlists(q: str | None = None, user: dict = Depends(current_user)) -> 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_playlist(payload: PlaylistPayload, user: dict = Depends(require(permissions.CAP_PLAYLISTS))) -> dict[str, Any]:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     pid = db.execute(
         "INSERT INTO playlists(name, description, loop) VALUES(?,?,?)",
-        (payload.name.strip(), (payload.description or "").strip() or None, 1 if payload.loop else 0),
+        (name, (payload.description or "").strip() or None, 1 if payload.loop else 0),
     )
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (pid,)))
 
@@ -170,10 +176,13 @@ def update_playlist(
     row = db.query_one("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
     if not row:
         raise HTTPException(status_code=404, detail="Playlist introuvable")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     db.execute(
         "UPDATE playlists SET name = ?, description = ?, loop = ?, updated_at = datetime('now') WHERE id = ?",
         (
-            payload.name.strip(),
+            name,
             (payload.description or "").strip() or None,
             1 if payload.loop else 0,
             playlist_id,
@@ -252,7 +261,9 @@ def update_item(
     if payload.transition_duration is not None:
         fields.append("transition_duration = ?")
         values.append(payload.transition_duration)
-    if payload.background_audio_id is not None:
+    # `background_audio_id: null` must be able to clear the music, so rely on
+    # which fields the caller actually sent (not on the value being non-null).
+    if "background_audio_id" in payload.model_fields_set:
         fields.append("background_audio_id = ?")
         values.append(payload.background_audio_id)
     if payload.background_volume is not None:
@@ -274,12 +285,20 @@ def duplicate_item(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Élément introuvable")
-    # Shift the following items down to make room, then insert the copy.
+    # Shift the following items down to make room, then insert the copy. Rows are
+    # moved one at a time from the highest position downwards: shifting them all
+    # in a single UPDATE would collide with the UNIQUE(playlist_id, position)
+    # index (and SQLite does not honour ORDER BY in UPDATE).
+    followers = db.query(
+        "SELECT id, position FROM playlist_items WHERE playlist_id = ? AND position > ? ORDER BY position DESC",
+        (playlist_id, row["position"]),
+    )
     with db.connection() as conn:
-        conn.execute(
-            "UPDATE playlist_items SET position = position + 1 WHERE playlist_id = ? AND position > ?",
-            (playlist_id, row["position"]),
-        )
+        for follower in followers:
+            conn.execute(
+                "UPDATE playlist_items SET position = ? WHERE id = ?",
+                (follower["position"] + 1, follower["id"]),
+            )
         conn.execute(
             """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
                                           transition, transition_duration, background_audio_id, background_volume)

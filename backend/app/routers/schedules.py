@@ -68,10 +68,13 @@ def create_schedule(payload: SchedulePayload, user: dict = Depends(require(permi
         "SELECT id FROM playlists WHERE id = ?", (payload.playlist_id,)
     ):
         raise HTTPException(status_code=404, detail="Playlist introuvable")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     sid = db.execute(
         "INSERT INTO schedules(name, playlist_id, days, start_time, end_time, enabled) VALUES(?,?,?,?,?,?)",
         (
-            payload.name.strip(),
+            name,
             payload.playlist_id,
             json.dumps(payload.days),
             payload.start_time,
@@ -88,10 +91,13 @@ def update_schedule(
 ) -> dict[str, Any]:
     if not db.query_one("SELECT id FROM schedules WHERE id = ?", (schedule_id,)):
         raise HTTPException(status_code=404, detail="Programme introuvable")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     db.execute(
         "UPDATE schedules SET name=?, playlist_id=?, days=?, start_time=?, end_time=?, enabled=? WHERE id=?",
         (
-            payload.name.strip(),
+            name,
             payload.playlist_id,
             json.dumps(payload.days),
             payload.start_time,
@@ -126,22 +132,27 @@ def active_playlist_id(now: datetime | None = None) -> int | None:
             days = json.loads(row["days"])
         except (json.JSONDecodeError, TypeError):
             continue
-        if weekday not in days:
-            continue
         try:
             start = time.fromisoformat(row["start_time"])
             end = time.fromisoformat(row["end_time"])
         except ValueError:
             continue
-        # Overnight programmes (start > end) wrap past midnight.
         if start <= end:
-            if start <= current < end:
+            # Same-day window: it runs on the listed days.
+            if weekday in days and start <= current < end:
                 return row["playlist_id"]
         else:
-            if current >= start or current < end:
+            # Overnight window (start > end): the part before midnight belongs to
+            # the listed day, the part after midnight to the *next* day. Without
+            # this the early-morning hours were never matched.
+            previous_day = (weekday - 1) % 7
+            if weekday in days and current >= start:
+                return row["playlist_id"]
+            if previous_day in days and current < end:
                 return row["playlist_id"]
     fallback = db.get_setting("fallback_playlist_id")
-    return int(fallback) if fallback else None
+    # A stored "0" (or empty) means "no fallback" — never a playlist id.
+    return int(fallback) if fallback and int(fallback) > 0 else None
 
 
 @router.get("/current")

@@ -161,8 +161,14 @@ def update_settings(payload: SettingsPayload, user: dict = Depends(require(permi
             raise HTTPException(status_code=422, detail="L'URL RTMP doit commencer par rtmp:// ou rtmps://")
         updates["stream_rtmp_url"] = url.rstrip("/")
     for key, value in updates.items():
-        if key in ALLOWED_SETTINGS:
-            db.set_setting(key, str(value))
+        if key not in ALLOWED_SETTINGS:
+            continue
+        # A zero fallback playlist means "none": clear the setting instead of
+        # storing 0, which would look like a (missing) playlist id 0.
+        if key == "fallback_playlist_id" and int(value or 0) == 0:
+            db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            continue
+        db.set_setting(key, str(value))
     return get_settings(user)
 
 

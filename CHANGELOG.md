@@ -3,6 +3,51 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.13.0] — 2026-11-15
+
+### Corrigé
+- **Dupliquer un élément de playlist** (autre que le dernier) provoquait une
+  erreur 500 : le décalage des positions violait la contrainte
+  `UNIQUE(playlist_id, position)`. Les lignes sont maintenant décalées une à une
+  en partant du bas.
+- **Musique de fond impossible à retirer** : un `PATCH` avec
+  `background_audio_id: null` était ignoré (le champ restait inchangé). On se
+  base désormais sur les champs réellement envoyés.
+- **Volume de musique à 0** : il était renvoyé comme `0.15` (le défaut). 0 est
+  maintenant conservé (silence voulu).
+- **Lecture partielle (`Range: bytes=-N`)** : l'en-tête renvoyait les N premiers
+  octets au lieu des N derniers. Corrigé (lecture des *derniers* N octets).
+- **Vignettes et aperçus accessibles sans authentification** : `/thumbnail` et
+  `/preview` exigeaient aucune session. Ils sont maintenant protégés (401).
+- **Vignette des fichiers audio jamais générée** : extraire une image d'un flux
+  audio échouait (« Output file does not contain any stream »). Une **forme
+  d'onde** est dessinée à la place (`showwavespic`), pour la vignette et l'aperçu.
+- **Renommer un utilisateur** sur un nom déjà pris provoquait une erreur 500
+  (contrainte `UNIQUE`) : renvoie désormais un 409 clair. La création vérifie et
+  enregistre le nom **dépouillé** (`" bob "` et `"bob"` étaient traités
+  différemment).
+- **Déplacement d'un média vers un dossier inexistant** : erreur 500 (clé
+  étrangère) → renvoie un 404.
+- **Programme nocturne non détecté après minuit** : une plage `22:00 → 02:00` du
+  lundi ne couvrait pas le mardi 01:00. La partie après minuit est rattachée au
+  jour précédent.
+- **Playlist de secours impossible à désactiver** : choisir « Aucune » stockait
+  `0`, interprété comme un identifiant de playlist. `0` efface désormais le
+  réglage.
+- **Import multiple** : un seul fichier non pris en charge faisait échouer tout
+  le lot (415). Les fichiers valides sont maintenant importés et les rejetés
+  listés (`rejected`).
+- **Noms vides** acceptés (chaîne d'espaces) sur playlists, scènes, flux et
+  programmes (création **et** modification) → rejetés (422).
+- **Avis de mise à jour** : il annonçait la version **quittée** et n'était jamais
+  affiché. Il lit maintenant le fichier `VERSION` installé et s'affiche une seule
+  fois à l'ouverture de l'interface.
+- **Réglages d'un élément** : enregistrer la transition **figeait** la durée
+  (0 remplacé par la durée effective). La valeur brute est conservée.
+- **Éditeur de scène** : changer le **type** d'un calque laissait les champs de
+  l'ancien type (ex. `countdown_seconds`, `feed_url`). Le calque repart d'un
+  état propre adapté au nouveau type.
+
 ## [2.12.0] — 2026-11-15
 
 ### Ajouté

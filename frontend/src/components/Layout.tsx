@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { Modal } from './ui'
+import { Modal, useToast } from './ui'
 import {
   IconCalendar,
   IconDashboard,
@@ -45,6 +45,7 @@ const TITLES: Record<string, string> = {
 
 export default function Layout() {
   const { user, channelName, logout } = useAuth()
+  const { push } = useToast()
   const navigate = useNavigate()
   const location = useLocation()
   const [version, setVersion] = useState('')
@@ -56,6 +57,17 @@ export default function Layout() {
       .then((d) => setVersion(d.version))
       .catch(() => {})
   }, [])
+
+  // Show the one-shot "updated to X" notice left by a successful update. The
+  // backend clears it on read, so it appears exactly once.
+  useEffect(() => {
+    api
+      .get<{ show: boolean; version?: string }>('/api/system/update-notice')
+      .then((d) => {
+        if (d.show) push({ kind: 'ok', title: `Application mise à jour vers la version ${d.version ?? ''}`.trim() })
+      })
+      .catch(() => {})
+  }, [push])
 
   const showChangelog = async () => {
     try {

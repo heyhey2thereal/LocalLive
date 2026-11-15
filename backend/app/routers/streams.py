@@ -97,13 +97,16 @@ def list_streams(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_stream(payload: StreamPayload, user: dict = Depends(require(permissions.CAP_STREAMS))) -> dict[str, Any]:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     sid = db.execute(
         """INSERT INTO streams(name, description, tags, privacy, category, encoding, kind,
                                rtmp_url, stream_key, output_file, width, height, fps,
                                bitrate, audio_bitrate, enabled)
            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            payload.name.strip(),
+            name,
             (payload.description or "").strip() or None,
             json.dumps(payload.tags),
             payload.privacy,
@@ -139,6 +142,9 @@ def update_stream(
     row = db.query_one("SELECT * FROM streams WHERE id = ?", (stream_id,))
     if not row:
         raise HTTPException(status_code=404, detail="Flux introuvable")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Le nom est requis")
     # An empty key clears it; the masked placeholder leaves it unchanged.
     key = row["stream_key"] or ""
     if payload.stream_key is not None:
@@ -153,7 +159,7 @@ def update_stream(
                   bitrate=?, audio_bitrate=?, enabled=?, updated_at=datetime('now')
            WHERE id=?""",
         (
-            payload.name.strip(),
+            name,
             (payload.description or "").strip() or None,
             json.dumps(payload.tags),
             payload.privacy,
