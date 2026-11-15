@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type Catalog, type LayerType, type Media, type Scene, type SceneLayer } from '../api'
 import SceneCanvas from '../components/SceneCanvas'
 import { SceneThumb } from '../components/ProgramPreview'
+import { fontFamily, fontWeight } from '../lib/fonts'
 import AddLayerMenu from '../components/AddLayerMenu'
 import { ConfirmDialog, EmptyState, Loading, Modal, useToast } from '../components/ui'
 import { IconDuplicate, IconLayers, IconPlus, IconRotate, IconSearch, IconTrash, IconZDown, IconZUp } from '../components/icons'
@@ -888,7 +889,7 @@ export default function Scenes() {
                         onChange={(e) => updateLayer(selectedLayer!, { font: e.target.value })}
                       >
                         {(catalog?.fonts ?? [{ id: 'default', label: 'Par défaut' }]).map((f) => (
-                          <option key={f.id} value={f.id}>
+                          <option key={f.id} value={f.id} style={{ fontFamily: fontFamily(f.id), fontWeight: fontWeight(f.id) }}>
                             {f.label}
                           </option>
                         ))}

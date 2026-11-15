@@ -3,6 +3,26 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.11.0] — 2026-11-14
+
+### Corrigé
+- **Mise à jour en un clic, sans configuration** : plus aucune commande à
+  enregistrer. Si le réglage `update_command` est vide, l'application utilise
+  automatiquement le programme standard `/usr/local/sbin/locallive-update`
+  installé par `install.sh`.
+- **Animation « Couleurs » (rainbow)** : elle fait maintenant défiler la couleur
+  du **texte** lui-même (et non plus un cadre autour). `fontcolor_expr`
+  n'évaluant pas les expressions sur toutes les versions de FFmpeg, le texte est
+  dessiné une fois par couleur, chacune activée à tour de rôle (`fx.rainbow_enable`).
+- **Polices** : la police choisie sur un calque est appliquée dans l'éditeur et
+  dans les moniteurs, et chaque nom dans le sélecteur s'affiche **dans sa propre
+  police** (`frontend/src/lib/fonts.ts`).
+
+### Ajouté
+- **Avis de mise à jour** : après une mise à jour réussie, un petit message
+  (« Application mise à jour vers la version X ») s'affiche **une seule fois** à
+  la prochaine ouverture de l'interface (`GET /api/system/update-notice`).
+
 ## [2.10.0] — 2026-11-14
 
 ### Corrigé

@@ -174,14 +174,15 @@ def test_marquee_is_single_pass():
     assert expr.startswith("w-min(")
 
 
-def test_rainbow_border_cycles_colours():
-    boxes = fx.rainbow_border(0, 0, 200, 100, speed=0.5)
-    assert len(boxes) == len(fx.RAINBOW_COLORS)
-    assert all("drawbox" in b and "enable=" in b for b in boxes)
+def test_rainbow_recolours_text_via_enable():
+    # The rainbow loop recolours the text: one enable window per colour.
+    windows = [fx.rainbow_enable(i, 0.5) for i in range(len(fx.RAINBOW_COLORS))]
+    assert len(windows) == len(fx.RAINBOW_COLORS)
+    assert all("between(" in w for w in windows)
 
 
 def test_rainbow_loop_does_not_move_text():
-    # The rainbow loop only draws a border: the text position/alpha are unchanged.
+    # The colour cycle is applied to the text; the position/alpha stay put.
     motion = fx.layer_motion(10, 20, anim_loop="rainbow")
     assert motion["x"] == "10" and motion["y"] == "20" and motion["alpha"] == "1"
 

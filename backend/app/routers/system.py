@@ -83,18 +83,25 @@ def update_check(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 @router.post("/update")
 def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str, Any]:
-    """Trigger the host update command if one is configured.
+    """Trigger the host update, with no manual configuration.
 
-    The service usually runs as an unprivileged user, so it cannot update itself.
-    The admin can set `update_command` (e.g. `sudo /opt/locallive/update.sh`) via
-    the settings; when it is empty we return a manual hint instead.
+    The self-updater (`/usr/local/sbin/locallive-update`) is installed by
+    install.sh, and the service user may run it through a restricted sudoers
+    rule. We therefore fall back to that default command when none is stored, so
+    the operator only ever has to click the button.
     """
     command = (db.get_setting("update_command", "") or "").strip()
+    if not command:
+        # Prefer the standard helper if it is present on this host.
+        from pathlib import Path
+
+        if Path("/usr/local/sbin/locallive-update").exists():
+            command = "sudo /usr/local/sbin/locallive-update"
     if not command:
         return {
             "ok": False,
             "manual": True,
-            "hint": "Aucune commande de mise à jour configurée. Lancez update.sh sur le serveur.",
+            "hint": "Programme de mise à jour introuvable. Relancez install.sh sur le serveur.",
         }
     try:
         proc = subprocess.run(
@@ -107,8 +114,22 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "Délai dépassé pendant la mise à jour"}
     if proc.returncode == 0:
+        # Remember the version that was just applied so the UI can show a short
+        # "updated" notice exactly once, the next time someone opens the app.
+        db.set_setting("pending_update_notice", __version__)
         return {"ok": True, "output": (proc.stdout or "")[-2000:]}
     return {"ok": False, "error": (proc.stderr or proc.stdout or "Échec de la mise à jour")[-2000:]}
+
+
+@router.get("/update-notice")
+def update_notice(user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Return (and clear) a one-shot 'updated to X' notice for the UI."""
+    pending = (db.get_setting("pending_update_notice", "") or "").strip()
+    if not pending:
+        return {"show": False}
+    db.set_setting("pending_update_notice", "")
+    return {"show": True, "version": pending}
+
 
 @router.get("/version")
 def version_info(user: dict = Depends(current_user)) -> dict[str, Any]:

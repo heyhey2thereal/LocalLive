@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
+import { fontFamily, fontWeight } from '../lib/fonts'
 import { formatClock } from './ProgramPreview'
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -385,6 +386,8 @@ export default function SceneCanvas({
                 opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
                 color: l.color,
                 fontSize: isBox ? (l.font_size ?? 32) * scale : undefined,
+                fontFamily: isBox ? fontFamily(l.font) : undefined,
+                fontWeight: isBox ? fontWeight(l.font) : undefined,
                 background: isBox ? l.background ?? 'transparent' : 'transparent',
                 padding: isBox ? '4px 8px' : 0,
                 // When an animation drives `transform`, it also owns the rotation

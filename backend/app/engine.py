@@ -803,34 +803,34 @@ class PlaybackEngine:
             arg = f"'{fx.escape_drawtext(text)}'"
             if "text_expr" in prs:
                 arg = f"'%{{eif\\:{prs['text_expr']}\\:d}}'"
-            dt = (
-                f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:"
-                f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
-            )
-            if spacing:
-                dt += f":line_spacing={spacing}"
-            if layer_font:
-                dt += f":fontfile={layer_font}"
-            if box:
-                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=10"
-            return dt
 
-        # A coloured border cycling through the rainbow, only when the layer
-        # loops with the "rainbow" animation. It draws around the layer box and
-        # never recolours the text itself.
-        def rainbow_suffix() -> str:
-            if (layer.get("anim_loop") or "none") != "rainbow":
-                return ""
-            bw = int(layer.get("width") or 0)
-            bh = int(layer.get("height") or 0)
-            boxes = fx.rainbow_border(x, y, bw, bh, speed)
-            return ("," + ",".join(boxes)) if boxes else ""
+            def one(fontcolor: str, enable: str = "") -> str:
+                dt = (
+                    f"drawtext=text={arg}:x={prs['x']}:y={prs['y']}:"
+                    f"fontsize={fontsize}:fontcolor={fontcolor}:alpha={prs['alpha']}"
+                )
+                if spacing:
+                    dt += f":line_spacing={spacing}"
+                if layer_font:
+                    dt += f":fontfile={layer_font}"
+                if box:
+                    dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=10"
+                if enable:
+                    dt += f":enable='{enable}'"
+                return dt
+
+            # The "rainbow" loop recolours the text itself. fontcolor_expr does
+            # not evaluate expressions on every build, so we draw the text once
+            # per colour, each enabled during its slice of the cycle.
+            if (layer.get("anim_loop") or "none") == "rainbow":
+                return ",".join(one(c, fx.rainbow_enable(i, speed)) for i, c in enumerate(fx.RAINBOW_COLORS))
+            return one(color)
 
         if ltype in ("text", "overlay"):
             if not layer.get("text"):
                 return False
             fontsize = int(layer.get("font_size", 48 if ltype == "text" else 36))
-            chain = draw_text(str(layer['text']), fontsize, box=bool(layer.get('background'))) + rainbow_suffix()
+            chain = draw_text(str(layer['text']), fontsize, box=bool(layer.get('background')))
             filters.append(f"{src}{chain}{out_label}")
             return True
 
@@ -850,16 +850,28 @@ class PlaybackEngine:
             # the filter_complex parser does not treat it as an option separator.
             expr = f"%{{eif\\:floor(({secs})/60)\\:d\\:2}}\\:%{{eif\\:mod({secs}\\,60)\\:d\\:2}}"
             fontsize = int(layer.get("font_size", 96))
-            dt = (
-                f"drawtext=text='{expr}':x={prs['x']}:y={prs['y']}:"
-                f"fontsize={fontsize}:fontcolor={color}:alpha={prs['alpha']}"
-            )
-            if layer_font:
-                dt += f":fontfile={layer_font}"
-            # No background box unless the layer explicitly asks for one.
-            if layer.get("background"):
-                dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
-            filters.append(f"{src}{dt}{rainbow_suffix()}{out_label}")
+
+            def clock_dt(fontcolor: str, enable: str = "") -> str:
+                dt = (
+                    f"drawtext=text='{expr}':x={prs['x']}:y={prs['y']}:"
+                    f"fontsize={fontsize}:fontcolor={fontcolor}:alpha={prs['alpha']}"
+                )
+                if layer_font:
+                    dt += f":fontfile={layer_font}"
+                # No background box unless the layer explicitly asks for one.
+                if layer.get("background"):
+                    dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
+                if enable:
+                    dt += f":enable='{enable}'"
+                return dt
+
+            if (layer.get("anim_loop") or "none") == "rainbow":
+                dt = ",".join(
+                    clock_dt(c, fx.rainbow_enable(i, speed)) for i, c in enumerate(fx.RAINBOW_COLORS)
+                )
+            else:
+                dt = clock_dt(color)
+            filters.append(f"{src}{dt}{out_label}")
             return True
 
         if ltype == "chat":
@@ -889,7 +901,7 @@ class PlaybackEngine:
                 dt += f":fontfile={layer_font}"
             if layer.get("background"):
                 dt += f":box=1:boxcolor={boxcolor}@0.5:boxborderw=12"
-            filters.append(f"{src}{dt}{rainbow_suffix()}{out_label}")
+            filters.append(f"{src}{dt}{out_label}")
             return True
 
         if ltype == "ticker":

@@ -265,37 +265,29 @@ def _loop_exprs(kind: str, x: float, y: float, speed: Any, duration: float) -> d
     if kind == "pulse_size":
         return {"x": bx, "y": by, "alpha": f"0.6+0.4*(1+sin(2*PI*{_float(speed, 0.8):.3f}*t))/2"}
     if kind == "rainbow":
-        # Handled by a dedicated animated border (see rainbow_border); no
-        # position/alpha change here so the text itself stays put and its colour
-        # is untouched (only the frame cycles).
+        # The colour cycle is applied to the text by the engine (see
+        # rainbow_enable); position/alpha stay put.
         return {"x": bx, "y": by, "alpha": "1"}
     return {"x": bx, "y": by, "alpha": "1"}
 
 
-# Colours cycled by the "rainbow" loop, applied to a border box (never the text).
+# Colours cycled by the "rainbow" loop, applied to the text itself.
 RAINBOW_COLORS = ["0xff0040", "0xff8a00", "0xffe600", "0x33cc33", "0x00b3ff", "0x8a2be2"]
 
 
-def rainbow_border(x: int, y: int, w: int, h: int, speed: Any, thickness: int = 5) -> list[str]:
-    """drawbox filters cycling a coloured border around a layer.
+def rainbow_enable(index: int, speed: Any) -> str:
+    """The `enable=` window during which RAINBOW_COLORS[index] is shown.
 
-    drawbox has no colour expression, so we emit one box per colour, each enabled
-    during its own slice of the cycle (enable='between(mod(t,P), a, b)').
+    drawtext's fontcolor_expr does not evaluate expressions on every FFmpeg
+    build, so the text is drawn once per colour, each enabled during its slice of
+    the cycle. This returns the enable expression for one slice.
     """
-    if w <= 0 or h <= 0:
-        return []
     v = _float(speed, 0.5)
     period = max(1.0 / max(v, 0.05), 0.4)
     step = period / len(RAINBOW_COLORS)
-    filters: list[str] = []
-    for i, color in enumerate(RAINBOW_COLORS):
-        a = i * step
-        b = (i + 1) * step
-        filters.append(
-            f"drawbox=x={x}:y={y}:w={w}:h={h}:color={color}@{0.9}:t={thickness}"
-            f":enable='between(mod(t\\,{period:.3f})\\,{a:.3f}\\,{b:.3f})'"
-        )
-    return filters
+    a = index * step
+    b = (index + 1) * step
+    return f"between(mod(t\\,{period:.3f})\\,{a:.3f}\\,{b:.3f})"
 
 
 def layer_motion(

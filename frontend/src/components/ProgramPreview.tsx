@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { EngineItem, Media, Scene, SceneLayer } from '../api'
 import { layerAnimation } from '../lib/animations'
+import { fontFamily, fontWeight } from '../lib/fonts'
 
 interface SceneLike {
   width: number
@@ -185,6 +186,8 @@ export function SceneRender({
                 opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
                 color: l.color,
                 fontSize: isBox ? (l.font_size ?? 32) * scale : undefined,
+                fontFamily: isBox ? fontFamily(l.font) : undefined,
+                fontWeight: isBox ? fontWeight(l.font) : undefined,
                 background: isBox ? l.background ?? 'transparent' : 'transparent',
                 padding: isBox ? '4px 8px' : 0,
                 transform: !anim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
