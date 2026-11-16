@@ -1,0 +1,480 @@
+// Interactive scene editor canvas.
+//
+// Features:
+//   * drag to move, eight handles to resize (corners + edge midpoints);
+//   * Canva-style smart guides: while dragging, edges/centres snap to the canvas
+//     edges, the canvas centre and the other layers' edges/centres. Holding
+//     Shift disables the smart guides (free movement);
+//   * Alt locks the aspect ratio while resizing;
+//   * arrow keys nudge the selected layer (1px, or 10px with Shift);
+//   * layers may leave the frame: an element can be dragged (or resized) past
+//     the canvas edges, which is shown with `overflow: visible` while editing.
+//     The frame is only a guide, not a hard clip, so an element can sit partly
+//     (or fully) outside it;
+//   * hovering a layer shows its outline and plays its animations once;
+//   * text layers scale their font with the box; images use the cached
+//     medium-resolution preview (fast to load, sharp enough to enlarge).
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { SceneLayer } from '../api'
+import { layerAnimation } from '../lib/animations'
+import { fontFamily, fontWeight } from '../lib/fonts'
+import { frameStyle } from '../lib/frames'
+import { formatClock } from './ProgramPreview'
+
+// Countdown preview: when the layer is set to "continue in background" the
+// remaining time is derived from the wall-clock start (so it keeps counting even
+// while the scene is not shown), otherwise the starting value is shown. A paused
+// countdown is frozen at the accumulated `countdown_elapsed`.
+function CountdownPreview({ layer, fontPx }: { layer: SceneLayer; fontPx: number }) {
+  const [, tick] = useState(0)
+  const live = layer.countdown_background && layer.countdown_start && !layer.countdown_paused
+  useEffect(() => {
+    if (!live) return
+    const t = window.setInterval(() => tick((v) => v + 1), 500)
+    return () => window.clearInterval(t)
+  }, [live, layer.countdown_start])
+  const total = layer.countdown_seconds ?? 60
+  const base = layer.countdown_elapsed ?? 0
+  let played = base
+  if (live) {
+    played = base + Math.max(0, Math.floor(Date.now() / 1000 - (layer.countdown_start as number)))
+  }
+  const secs = layer.countdown_mode === 'up' ? total + played : Math.max(0, total - played)
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0')
+  const ss = String(secs % 60).padStart(2, '0')
+  return (
+    <span style={{ fontSize: fontPx }}>
+      {mm}:{ss}
+      {layer.countdown_background && <span title="Continue en arrière-plan"> ⟳</span>}
+      {layer.countdown_paused && <span title="En pause"> ⏸</span>}
+    </span>
+  )
+}
+
+type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+
+const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+const GRID = 10
+const MIN_SIZE = 8
+// A layer may be stretched well beyond the frame (the editor shows it cropped on
+// air). This caps the size so a stray drag cannot create an absurdly large box.
+const MAX_SCALE = 8
+const MIN_FONT = 8
+const SNAP = 6 // scene units within which a guide snaps
+
+export interface MediaInfo {
+  id: number
+  title: string
+  kind: string
+  width?: number | null
+  height?: number | null
+  thumbnail_url: string | null
+  stream_url?: string
+  preview_url?: string
+}
+
+interface Props {
+  width: number
+  height: number
+  background: string
+  layers: SceneLayer[]
+  selected: number | null
+  displayWidth: number
+  mediaFor: (id?: number | null) => MediaInfo | undefined
+  onSelect: (index: number | null) => void
+  onChange: (layers: SceneLayer[]) => void
+  /** Layer index to preview once (hovered in the layers list), or null. */
+  previewIndex?: number | null
+}
+
+interface Guides {
+  v: number[]
+  h: number[]
+}
+
+function snapGrid(value: number, active: boolean): number {
+  return active ? Math.round(value / GRID) * GRID : Math.round(value)
+}
+
+export default function SceneCanvas({
+  width,
+  height,
+  background,
+  layers,
+  selected,
+  displayWidth,
+  mediaFor,
+  onSelect,
+  onChange,
+  previewIndex = null,
+}: Props) {
+  const scale = displayWidth / width
+  const layerRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  const [guides, setGuides] = useState<Guides>({ v: [], h: [] })
+  // Layer currently under the pointer: it gets an outline and plays its
+  // animations once (a quick preview of the motion).
+  const [hovered, setHovered] = useState<number | null>(null)
+  // True while a layer is being dragged/resized; the hover preview is suppressed
+  // so the animation does not fight the live drag.
+  const [dragging, setDragging] = useState(false)
+  const drag = useRef<{
+    index: number
+    handle: Handle | 'move'
+    startX: number
+    startY: number
+    orig: SceneLayer
+    baseW: number
+    baseH: number
+    baseFont: number
+    isText: boolean
+  } | null>(null)
+
+  const patchLayer = useCallback(
+    (index: number, patch: Partial<SceneLayer>) => {
+      onChange(layers.map((l, i) => (i === index ? { ...l, ...patch } : l)))
+    },
+    [layers, onChange],
+  )
+
+  // Keep a moved layer's position free (it may leave the frame); round to whole
+  // units. Only the size is bounded elsewhere, never the position.
+  const clampMove = (l: { x: number; y: number; width?: number | null; height?: number | null }) => ({
+    x: Math.round(l.x),
+    y: Math.round(l.y),
+  })
+
+  // Bound a resized box: never smaller than MIN_SIZE, but it may grow well
+  // beyond the frame (the operator can stretch an element past the edges). The
+  // position is left free too, so a box may sit partly (or fully) outside the
+  // frame; the edge being dragged stays where the user puts it.
+  const clampResize = (
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    _hnd: Handle,
+  ): { x: number; y: number; width: number; height: number } => {
+    const maxW = Math.max(width * MAX_SCALE, MIN_SIZE)
+    const maxH = Math.max(height * MAX_SCALE, MIN_SIZE)
+    w = Math.max(MIN_SIZE, Math.min(w, maxW))
+    h = Math.max(MIN_SIZE, Math.min(h, maxH))
+    return { x, y, width: w, height: h }
+  }
+
+  // Build the list of smart-guide positions (canvas + other layers).
+  const guidePositions = (index: number) => {
+    const v = [0, width / 2, width]
+    const h = [0, height / 2, height]
+    layers.forEach((l, i) => {
+      if (i === index) return
+      const w = l.width ?? 0
+      const hh = l.height ?? 0
+      v.push(l.x, l.x + w / 2, l.x + w)
+      h.push(l.y, l.y + hh / 2, l.y + hh)
+    })
+    return { v, h }
+  }
+
+  // Snap a moving box's edges/centre to the nearest guide.
+  const applyGuides = (
+    index: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): { x: number; y: number; guides: Guides } => {
+    const { v, h: hs } = guidePositions(index)
+    const activeV: number[] = []
+    const activeH: number[] = []
+    const xs = [x, x + w / 2, x + w]
+    const ys = [y, y + h / 2, y + h]
+    let bestDx = Infinity
+    let bestX = x
+    for (const gx of v) {
+      for (const px of xs) {
+        const d = Math.abs(px - gx)
+        if (d < SNAP && d < bestDx) {
+          bestDx = d
+          bestX = x + (gx - px)
+        }
+      }
+    }
+    if (bestDx < SNAP) {
+      const moved = bestX - x
+      xs.forEach((px) => {
+        if (v.some((gx) => Math.abs(px + moved - gx) < 0.5)) activeV.push(px + moved)
+      })
+      x = bestX
+    }
+    let bestDy = Infinity
+    let bestY = y
+    for (const gy of hs) {
+      for (const py of ys) {
+        const d = Math.abs(py - gy)
+        if (d < SNAP && d < bestDy) {
+          bestDy = d
+          bestY = y + (gy - py)
+        }
+      }
+    }
+    if (bestDy < SNAP) {
+      const moved = bestY - y
+      ys.forEach((py) => {
+        if (hs.some((gy) => Math.abs(py + moved - gy) < 0.5)) activeH.push(py + moved)
+      })
+      y = bestY
+    }
+    return { x, y, guides: { v: activeV, h: activeH } }
+  }
+
+  useEffect(() => {
+    if (selected === null) return
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      const step = e.shiftKey ? GRID : 1
+      const layer = layers[selected]
+      if (!layer) return
+      let dx = 0
+      let dy = 0
+      if (e.key === 'ArrowLeft') dx = -step
+      else if (e.key === 'ArrowRight') dx = step
+      else if (e.key === 'ArrowUp') dy = -step
+      else if (e.key === 'ArrowDown') dy = step
+      else return
+      e.preventDefault()
+      patchLayer(selected, clampMove({ x: layer.x + dx, y: layer.y + dy, width: layer.width, height: layer.height }))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selected, layers, patchLayer])
+
+  const startDrag = (e: React.MouseEvent, index: number, handle: Handle | 'move') => {
+    e.stopPropagation()
+    onSelect(index)
+    setDragging(true)
+    setHovered(null)
+    const layer = layers[index]
+    const isText = layer.type === 'text' || layer.type === 'overlay'
+    const el = layerRefs.current.get(index)
+    const rect = el?.getBoundingClientRect()
+    const baseW = rect && rect.width > 0 ? rect.width / scale : layer.width ?? 200
+    const baseH = rect && rect.height > 0 ? rect.height / scale : layer.height ?? 100
+    const baseFont = layer.font_size ?? (layer.type === 'text' ? 48 : 36)
+    drag.current = { index, handle, startX: e.clientX, startY: e.clientY, orig: { ...layer }, baseW, baseH, baseFont, isText }
+
+    // Compute the new layer position/size from the mouse event.
+    const compute = (ev: MouseEvent): { patch: Partial<SceneLayer>; guides: Guides } => {
+      const d = drag.current!
+      const dx = (ev.clientX - d.startX) / scale
+      const dy = (ev.clientY - d.startY) / scale
+      const shift = ev.shiftKey
+      const alt = ev.altKey
+      if (d.handle === 'move') {
+        const w = d.orig.width ?? 0
+        const h = d.orig.height ?? 0
+        let nx = d.orig.x + dx
+        let ny = d.orig.y + dy
+        let g: Guides = { v: [], h: [] }
+        if (!shift) {
+          const res = applyGuides(d.index, nx, ny, w, h)
+          nx = res.x
+          ny = res.y
+          g = res.guides
+        }
+        return { patch: clampMove({ x: nx, y: ny, width: w, height: h }), guides: g }
+      }
+      let x = d.orig.x
+      let y = d.orig.y
+      let w = d.baseW
+      let h = d.baseH
+      const hnd = d.handle
+      if (hnd.includes('w')) {
+        x = d.orig.x + dx
+        w = d.baseW - dx
+      }
+      if (hnd.includes('e')) w = d.baseW + dx
+      if (hnd.includes('n')) {
+        y = d.orig.y + dy
+        h = d.baseH - dy
+      }
+      if (hnd.includes('s')) h = d.baseH + dy
+      if (w < MIN_SIZE) {
+        if (hnd.includes('w')) x = d.orig.x + (d.baseW - MIN_SIZE)
+        w = MIN_SIZE
+      }
+      if (h < MIN_SIZE) {
+        if (hnd.includes('n')) y = d.orig.y + (d.baseH - MIN_SIZE)
+        h = MIN_SIZE
+      }
+      if (alt && hnd.length === 2 && d.baseW > 0 && d.baseH > 0) {
+        const ratio = d.baseW / d.baseH
+        h = w / ratio
+        if (hnd.includes('n')) y = d.orig.y + (d.baseH - h)
+      }
+      const bounded = clampResize(x, y, w, h, hnd)
+      const patch: Partial<SceneLayer> = {
+        x: snapGrid(bounded.x, shift),
+        y: snapGrid(bounded.y, shift),
+        width: snapGrid(bounded.width, shift),
+        height: snapGrid(bounded.height, shift),
+      }
+      if (d.isText && d.baseH > 0) {
+        patch.font_size = Math.max(MIN_FONT, Math.round((d.baseFont * bounded.height) / d.baseH))
+      }
+      return { patch, guides: { v: [], h: [] } }
+    }
+
+    // Throttle updates to one per animation frame so dragging stays fluid even
+    // with many layers (a re-render per mousemove would stutter).
+    let raf = 0
+    let pending: MouseEvent | null = null
+    const flush = () => {
+      raf = 0
+      const d = drag.current
+      if (!d || !pending) return
+      const { patch, guides: g } = compute(pending)
+      pending = null
+      setGuides(g)
+      patchLayer(d.index, patch)
+    }
+    const onMove = (ev: MouseEvent) => {
+      pending = ev
+      if (!raf) raf = window.requestAnimationFrame(flush)
+    }
+    const onUp = () => {
+      drag.current = null
+      setDragging(false)
+      if (raf) window.cancelAnimationFrame(raf)
+      setGuides({ v: [], h: [] })
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <div
+      className="scene-canvas"
+      style={{ width: displayWidth, aspectRatio: `${width}/${height}`, background }}
+      onClick={() => onSelect(null)}
+    >
+      {guides.v.map((gx, i) => (
+        <div key={`gv${i}`} className="scene-guide v" style={{ left: gx * scale }} />
+      ))}
+      {guides.h.map((gy, i) => (
+        <div key={`gh${i}`} className="scene-guide h" style={{ top: gy * scale }} />
+      ))}
+      {layers
+        .map((l, i) => ({ l, i }))
+        .sort((a, b) => (a.l.z ?? 0) - (b.l.z ?? 0))
+        .map(({ l, i }) => {
+          const m = mediaFor(l.media_id)
+          const isText = l.type === 'text' || l.type === 'overlay'
+          const isCode = l.type === 'code'
+          const isReactive = l.type === 'reactive'
+          const isChat = l.type === 'chat'
+          const isCountdown = l.type === 'countdown'
+          const isClock = l.type === 'clock'
+          const isTicker = l.type === 'ticker'
+          const isBox = isText || isChat || isCountdown || isClock || isTicker
+          const isMedia = l.type === 'image' || l.type === 'video' || l.type === 'logo'
+          // Cached medium-resolution preview loads fast; thumbnail is the fallback.
+          const imgSrc = isMedia && m ? m.preview_url ?? m.stream_url ?? m.thumbnail_url : null
+          const blur = l.blur ?? 0
+          // Always give the layer an explicit size, even if the stored layer has
+          // none (older scenes): otherwise the image would dictate the box size
+          // and overflow the frame. Missing height is derived from the media's
+          // aspect ratio, or defaults to a 16:9 box.
+          const lw = l.width ?? Math.round(width * 0.25)
+          let lh = l.height ?? 0
+          if (!lh) {
+            const ratio = m && m.width && m.height ? m.height / m.width : 9 / 16
+            lh = Math.round(lw * ratio)
+          }
+          // Layers are static by default (opening a scene must not spam every
+          // animation). Hovering a layer — selected or not — plays its animation
+          // once, so the operator can preview the motion they just chose.
+          // The "audio-reactive" loop is the exception: it depends on the live
+          // music, so the editor never plays it as a demo (it would only show a
+          // meaningless scale pulse).
+          const isSelected = selected === i
+          const isHovered = hovered === i || previewIndex === i
+          const canDemo = l.anim_loop !== 'audio_reactive'
+          const anim = isHovered && !dragging && canDemo ? layerAnimation(l, 0, width * scale, false, true) : null
+          const showAnim = Boolean(anim)
+          // Remount the layer while it is hovered so the one-shot animation
+          // starts from the beginning on every hover (a CSS animation does not
+          // restart when only its iteration count changes). Layers without an
+          // animation keep a stable key, so media never flickers.
+          const key = showAnim ? `${i}-hover` : i
+          return (
+            <div
+              key={key}
+              ref={(el) => {
+                if (el) layerRefs.current.set(i, el)
+                else layerRefs.current.delete(i)
+              }}
+              className={`scene-layer ${isSelected ? 'selected' : ''} ${isHovered && !isSelected ? 'hovered' : ''} ${showAnim && anim ? anim.className : ''}`}
+              style={{
+                left: l.x * scale,
+                top: l.y * scale,
+                width: lw * scale,
+                height: lh * scale,
+                opacity: l.visible === false ? 0.3 : l.opacity ?? 1,
+                color: l.color,
+                fontSize: isBox ? (l.font_size ?? 32) * scale : undefined,
+                fontFamily: isBox ? fontFamily(l.font) : undefined,
+                fontWeight: isBox ? fontWeight(l.font) : undefined,
+                background: isBox ? l.background ?? 'transparent' : 'transparent',
+                padding: isBox ? '4px 8px' : 0,
+                // When an animation drives `transform`, it also owns the rotation
+                // (via --ll-rot), so we must not set it inline.
+                transform: !showAnim && l.rotation ? `rotate(${l.rotation}deg)` : undefined,
+                zIndex: (l.z ?? 0) + 1,
+                ...(showAnim && anim ? anim.style : {}),
+              }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
+              onMouseDown={(e) => startDrag(e, i, 'move')}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span
+                className="scene-layer-inner"
+                style={{ filter: blur ? `blur(${blur * scale}px)` : undefined, ...(frameStyle(l, scale) ?? {}) }}
+              >
+                {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
+                {isMedia && !imgSrc && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{l.type}</span>}
+                {isReactive && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Réactif · {l.visualizer}</span>}
+                {isCode && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Code</span>}
+                {isChat && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Chat</span>}
+                {isCountdown && (
+                  <CountdownPreview
+                    layer={l}
+                    fontPx={(l.font_size ?? 96) * scale * 0.5}
+                  />
+                )}
+                {isClock && (
+                  <span style={{ fontSize: (l.font_size ?? 64) * scale * 0.5 }}>
+                    {formatClock(new Date(), l.clock_format ?? '%H:%M', Boolean(l.clock_utc))}
+                  </span>
+                )}
+                {isTicker && (
+                  <span style={{ fontSize: (l.font_size ?? 40) * scale * 0.5 }}>
+                    {l.feed_url ? 'Bandeau RSS' : 'Bandeau (source RSS)'}
+                  </span>
+                )}
+                {isText && (l.text || 'Texte')}
+              </span>
+              {selected === i &&
+                HANDLES.map((h) => (
+                  <span key={h} className={`scene-handle h-${h}`} onMouseDown={(e) => startDrag(e, i, h)} />
+                ))}
+            </div>
+          )
+        })}
+    </div>
+  )
+}
