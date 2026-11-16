@@ -328,8 +328,9 @@ class PlaybackEngine:
         """Jump the broadcast to `position` seconds into the current cycle.
 
         The item that contains `position` is rotated to the front and the process
-        is restarted there, so the live resumes from the requested point (used by
-        the operator's sound console when scrubbing the music).
+        is restarted there, and the broadcast resumes *inside* that item (by
+        seeking the item's source) so scrubbing lands exactly on the requested
+        point instead of restarting the item from its beginning.
         """
         with self._lock:
             if not self._state.running:
@@ -340,14 +341,31 @@ class PlaybackEngine:
             position = max(0.0, float(position))
             acc = 0.0
             target = 0
+            offset_in_item = 0.0
             for k, it in enumerate(items):
-                acc += it["duration"] or 0
-                if position < acc:
+                dur = it["duration"] or 0
+                if position < acc + dur:
                     target = k
+                    offset_in_item = position - acc
                     break
+                acc += dur
             else:
                 target = len(items) - 1
+                offset_in_item = 0.0
             rotated = items[target:] + items[:target]
+            # Seek into the target item's source (media can be seeked; a scene is
+            # regenerated, so its picture restarts). The item's effective duration
+            # is reduced to the remaining time so the cycle timeline matches FFmpeg
+            # (which restarts its clock at 0 after the seek). A scene whose music
+            # is continued still advances the music by the offset.
+            first = dict(rotated[0])
+            can_seek_media = first.get("kind") in ("video", "audio")
+            if offset_in_item > 0.05 and (can_seek_media or first.get("background_audio_path")):
+                first["seek_offset"] = offset_in_item
+                first["duration"] = max(0.2, float(first.get("duration") or 0) - offset_in_item)
+            else:
+                first["seek_offset"] = 0.0
+            rotated = [first] + rotated[1:]
             self._state.items = [_public_item(i) for i in rotated]
             self._state.cycle_duration = sum(i["duration"] or 0 for i in rotated)
             self._state.current_index = 0
@@ -422,8 +440,16 @@ class PlaybackEngine:
         prev_bg_path: str | None = None
         prev_bg_id: int | None = None
         prev_bg_volume = 0.0
+        # Cumulative offset into the *same* track when the previous item's music
+        # is continued: item N must start the track where item N-1 stopped,
+        # otherwise the music restarts from the beginning at every item.
+        chain_offset = 0.0
+        prev_duration = 0.0
         for r in rows:
             d = dict(r)
+            # The media's own duration (before any per-item override), used to
+            # decide whether the item can be stream-copied (a trim needs a decode).
+            d["source_duration"] = float(d.get("duration") or 0)
             if d["scene_id"]:
                 d["kind"] = "scene"
                 d["duration"] = float(d["override_duration"] or default_image)
@@ -437,7 +463,9 @@ class PlaybackEngine:
                 elif d["kind"] == "audio":
                     d["duration"] = float(d["duration"] or d["override_duration"] or 0)
                 else:
-                    d["duration"] = float(d["duration"] or 0)
+                    # A video honours its per-item override (a shorter duration
+                    # cuts the video), falling back to its own length.
+                    d["duration"] = float(d["override_duration"] or d["duration"] or 0)
             d["transition"] = d.get("transition") or "cut"
             d["transition_duration"] = float(d.get("transition_duration") or 0)
             d["background_volume"] = float(d.get("background_volume") or 0)
@@ -446,14 +474,22 @@ class PlaybackEngine:
             bg_path = d.get("bg_path")
             d["background_audio_path"] = bg_path if bg_path and Path(bg_path).exists() else None
             # "Continue previous music": keep playing the track of the item above
-            # instead of starting a new one (the music does not restart).
+            # instead of starting a new one (the music does not restart). The
+            # offset advances by the previous item's duration so the track plays
+            # continuously across items.
+            d["background_audio_offset"] = 0.0
             if d.get("background_audio_continue") and prev_bg_path:
                 d["background_audio_path"] = prev_bg_path
                 d["background_audio_id"] = prev_bg_id
                 d["background_volume"] = prev_bg_volume
+                chain_offset += prev_duration
+                d["background_audio_offset"] = chain_offset
+            else:
+                chain_offset = 0.0
             prev_bg_path = d.get("background_audio_path")
             prev_bg_id = d.get("background_audio_id")
             prev_bg_volume = d.get("background_volume")
+            prev_duration = d["duration"]
             items.append(d)
         return items
 
@@ -782,6 +818,14 @@ class PlaybackEngine:
         # A fade needs decoding, so it forces the filter pipeline.
         if any((i.get("fade_in") or 0) > 0 or (i.get("fade_out") or 0) > 0 for i in items):
             return False
+        # A per-item duration shorter than the source needs a trim (a decode), so
+        # it cannot be stream-copied. A seek offset also forces the filter path.
+        for i in items:
+            src = float(i.get("source_duration") or 0)
+            if src and float(i.get("duration") or 0) < src - 0.05:
+                return False
+            if float(i.get("seek_offset") or 0) > 0.05:
+                return False
         first = items[0]
         for item in items:
             if item["video_codec"] != first["video_codec"]:
@@ -864,6 +908,9 @@ class PlaybackEngine:
 
         for n, item in enumerate(items):
             dur = max(item["duration"] or 0, 0.2)
+            # Resume inside the item when the operator scrubbed (seek): the media
+            # input starts at `seek_offset` and plays for the remaining time.
+            seek = float(item.get("seek_offset") or 0)
             if item["kind"] == "image":
                 vi = add_input(["-loop", "1", "-t", f"{dur:.3f}", "-i", item["path"]])
                 filters.append(f"[{vi}:v]{v_base},trim=duration={dur:.3f},{v_tail}[v{n}]")
@@ -876,9 +923,20 @@ class PlaybackEngine:
                 self._scene_graph(item, filters, add_input, w, h, fps, font, n)
                 self._audio_segment(item, filters, add_input, n, dur, a_norm, None)
             else:  # video — reuse the same input for its video and audio streams
-                vi = add_input(["-i", item["path"]])
-                filters.append(f"[{vi}:v]{v_base},{v_tail}[v{n}]")
-                self._audio_segment(item, filters, add_input, n, dur, a_norm, vi)
+                # `seek` resumes inside the source; `dur` is already the remaining
+                # time (the seek method reduced it), so the segment plays `dur`.
+                pre = ["-ss", f"{seek:.3f}"] if seek > 0.05 else []
+                vi = add_input(pre + ["-i", item["path"]])
+                # Trim the video to the item's configured duration when it is
+                # shorter than the source (a shorter override cuts the video, so
+                # the next scene really appears when it is due). `source_duration`
+                # is the media's own length; the override is `dur`.
+                src_dur = float(item.get("source_duration") or 0)
+                if (src_dur and dur < src_dur - 0.05) or seek > 0.05:
+                    filters.append(f"[{vi}:v]{v_base},trim=duration={dur:.3f},{v_tail}[v{n}]")
+                else:
+                    filters.append(f"[{vi}:v]{v_base},{v_tail}[v{n}]")
+                self._audio_segment(item, filters, add_input, n, dur, a_norm, vi, seek=seek)
 
         # --- assemble segments: cross-fades then background music ------------
         video = self._assemble_video(items, filters, len(items))
@@ -910,20 +968,28 @@ class PlaybackEngine:
 
     def _audio_segment(
         self, item: dict[str, Any], filters: list[str], add_input,
-        n: int, dur: float, a_norm: str, video_index: int | None,
+        n: int, dur: float, a_norm: str, video_index: int | None, seek: float = 0.0,
     ) -> None:
         """Emit the [aN] audio label, mixing the background track when present.
 
         For a video item with sound the audio is read from the same input as the
-        video (`video_index`), avoiding a second decode of the same file.
+        video (`video_index`), avoiding a second decode of the same file. `seek`
+        is the offset already applied to that shared input (so the audio is only
+        trimmed for the remaining time).
         """
+        remaining = dur
         bg = item.get("background_audio_path")
         kind = item["kind"]
         if kind == "video" and item.get("has_audio") and video_index is not None:
-            filters.append(f"[{video_index}:a]{a_norm},asetpts=PTS-STARTPTS[base{n}]")
+            # Trim the source audio to the item's duration too, so a shortened
+            # video does not carry sound past the next scene.
+            src_dur = float(item.get("source_duration") or 0)
+            trim = f",atrim=duration={remaining:.3f}" if (src_dur and remaining < src_dur - 0.05) or seek > 0.05 else ""
+            filters.append(f"[{video_index}:a]{a_norm}{trim},asetpts=PTS-STARTPTS[base{n}]")
         elif kind == "audio":
-            ai = add_input(["-t", f"{dur:.3f}", "-i", item["path"]])
-            filters.append(f"[{ai}:a]{a_norm},atrim=duration={dur:.3f},asetpts=PTS-STARTPTS[base{n}]")
+            pre = ["-ss", f"{seek:.3f}"] if seek > 0.05 else []
+            ai = add_input(pre + ["-t", f"{remaining:.3f}", "-i", item["path"]])
+            filters.append(f"[{ai}:a]{a_norm},atrim=duration={remaining:.3f},asetpts=PTS-STARTPTS[base{n}]")
         else:
             ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
             filters.append(f"[{ai}:a]anull[base{n}]")
@@ -941,9 +1007,14 @@ class PlaybackEngine:
             fade += f",afade=t=out:st={max(0.0, dur - fo):.3f}:d={fo:.3f}"
 
         if bg:
-            bgi = add_input(["-t", f"{dur:.3f}", "-i", bg])
+            # When the item continues the previous track, seek into it by the
+            # accumulated offset so it plays continuously (instead of restarting
+            # at 0 on every item). A scrub (`seek`) advances the music too, even
+            # for a scene item (whose picture is regenerated, not seeked).
+            offset = float(item.get("background_audio_offset") or 0) + seek
+            bgi = add_input(["-ss", f"{offset:.3f}", "-t", f"{remaining:.3f}", "-i", bg])
             vol = float(item.get("background_volume") or 0.15)
-            filters.append(f"[{bgi}:a]{a_norm},atrim=duration={dur:.3f},asetpts=PTS-STARTPTS,volume={vol:.3f}[bgm{n}]")
+            filters.append(f"[{bgi}:a]{a_norm},atrim=duration={remaining:.3f},asetpts=PTS-STARTPTS,volume={vol:.3f}[bgm{n}]")
             filters.append(
                 f"[base{n}][bgm{n}]amix=inputs=2:duration=first:dropout_transition=0:normalize=0"
                 f"{fade}[a{n}]"

@@ -3,6 +3,24 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.16.1] — 2026-11-16
+
+### Corrigé
+- **« Continuer la musique précédente » ne fonctionnait pas** : l'élément qui
+  reprend la piste du précédent la **redémarrait au début** au lieu de continuer.
+  Le moteur calcule maintenant un **décalage cumulé** et reprend la piste là où
+  l'élément précédent s'est arrêté (le morceau ne redémarre plus).
+- **La barre de musique en bas ne permettait pas d'avancer** : chaque
+  déplacement du curseur relançait le direct (un appel par pixel), donc la
+  position ne se stabilisait jamais. La barre ne **valide le déplacement qu'au
+  relâchement** ; et un déplacement reprend désormais **à l'intérieur** de
+  l'élément (le média est « seeké ») au lieu de repartir de son début.
+- **Le programme ne changeait pas de scène à l'heure prévue** (cas d'une vidéo) :
+  la **durée configurée d'une vidéo était ignorée** — une vidéo de 10 s réglée
+  sur 3 s jouait 10 s, donc l'image ne changeait pas quand la scène suivante
+  était due. La vidéo est maintenant **coupée à la durée de l'élément** (et son
+  son aussi), ce qui force le chemin de filtres.
+
 ## [2.16.0] — 2026-11-16
 
 ### Corrigé

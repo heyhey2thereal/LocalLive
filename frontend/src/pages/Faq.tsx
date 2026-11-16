@@ -98,7 +98,11 @@ const SECTIONS: Section[] = [
       },
       {
         q: 'Comment continuer la musique d’un élément sur le suivant ?',
-        a: "Dans les réglages d'un élément (bouton transition/musique), cochez « Continuer la musique précédente ». L'élément garde alors la piste de l'élément du dessus au lieu d'en démarrer une autre.",
+        a: "Dans les réglages d'un élément (bouton transition/musique), cochez « Continuer la musique précédente ». L'élément garde alors la piste de l'élément du dessus, qui continue là où elle s'était arrêtée (elle ne redémarre pas).",
+      },
+      {
+        q: 'La barre de musique en bas permet-elle d’avancer dans la musique ?',
+        a: "Oui. Glissez le curseur : la position ne s'applique qu'au relâchement (pour ne pas relancer le direct à chaque pixel), et la musique reprend exactement à l'endroit choisi — à l'intérieur du morceau, pas depuis le début.",
       },
       {
         q: 'Comment faire une transition entre deux éléments ?',

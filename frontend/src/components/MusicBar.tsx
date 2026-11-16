@@ -33,6 +33,10 @@ export default function MusicBar({
   const [duration, setDuration] = useState(0)
   const [busy, setBusy] = useState(false)
   const [volume, setVolume] = useState(() => getMonitorVolume())
+  // While the operator drags the progress bar we show a local position and only
+  // commit the seek on release. Sending a seek per pixel would restart the live
+  // on every move, so the bar could never settle (it felt like "can't advance").
+  const [scrub, setScrub] = useState<number | null>(null)
 
   const running = Boolean(program?.running)
   const programItem = program?.current ?? null
@@ -72,6 +76,9 @@ export default function MusicBar({
   // On air the position/duration come from the engine, so the bar matches the live.
   const livePos = running ? Math.min(program?.position ?? 0, program?.cycle_duration ?? 0) : position
   const liveDur = running ? program?.cycle_duration ?? 0 : duration
+  // The value the slider shows: the local scrub position while dragging, else the
+  // real position.
+  const shownPos = scrub !== null ? scrub : Math.min(livePos, liveDur || 0)
 
   const toggle = async () => {
     if (running) {
@@ -90,7 +97,10 @@ export default function MusicBar({
     else el.pause()
   }
 
+  // `seek` is the *committed* seek (slider released); `onInput` only moves the
+  // handle locally so the live is not restarted on every pixel.
   const seek = async (value: number) => {
+    setScrub(null)
     if (running) {
       setBusy(true)
       try {
@@ -143,13 +153,16 @@ export default function MusicBar({
           min={0}
           max={liveDur || 0}
           step={0.1}
-          value={Math.min(livePos, liveDur || 0)}
-          onChange={(e) => void seek(Number(e.target.value))}
+          value={Math.min(shownPos, liveDur || 0)}
+          onChange={(e) => setScrub(Number(e.target.value))}
+          onMouseUp={(e) => void seek(Number((e.target as HTMLInputElement).value))}
+          onTouchEnd={(e) => void seek(Number((e.target as HTMLInputElement).value))}
+          onKeyUp={(e) => void seek(Number((e.target as HTMLInputElement).value))}
           title="Reculer / avancer"
         />
       </div>
       <span className="text-sm muted-2 nowrap">
-        {formatDuration(livePos)} / {formatDuration(liveDur)}
+        {formatDuration(shownPos)} / {formatDuration(liveDur)}
       </span>
       {/* Monitor output volume (what the operator hears, not the on-air mix). */}
       <div className="music-bar-volume" title="Volume du moniteur">

@@ -699,3 +699,153 @@ def test_engine_seek_and_reload(installed):
     assert eng.seek(2.0)["ok"] is False
     assert eng.reload_if_live(pid)["ok"] is True
     assert eng.reload_if_live(pid)["reloaded"] is False
+
+
+def test_continue_previous_music_advances_the_track(installed, tmp_path):
+    """Regression: the continued music must keep playing (not restart at 0).
+
+    The item that continues the previous track has to start the track where the
+    previous item stopped, via an accumulated seek offset.
+    """
+    a = _audio(tmp_path)
+    db.execute(
+        "INSERT INTO media(title, filename, path, kind, mime, size, duration, has_audio) VALUES(?,?,?,?,?,?,?,?)",
+        ("Music", a.name, str(a), "audio", "audio/mpeg", a.stat().st_size, 2.0, 1),
+    )
+    aid = db.query_one("SELECT id FROM media WHERE title='Music'")["id"]
+    s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration, background_audio_id, background_volume) "
+        "VALUES(?,?,?,?,?,?)",
+        (pid, s1, 0, 4.0, aid, 0.5),
+    )
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration, background_audio_continue) VALUES(?,?,?,?,?)",
+        (pid, s2, 1, 4.0, 1),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    assert items[0]["background_audio_offset"] == 0.0
+    # The second item resumes the track at the first item's duration.
+    assert items[1]["background_audio_offset"] == 4.0
+
+    cmd, _ = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(tmp_path / "o.mp4"), width=320, height=240, fps=25, realtime=False)
+    )
+    # The continued track is seeked to the accumulated offset.
+    assert "-ss" in cmd
+    assert "4.000" in cmd
+
+
+def test_video_item_honours_its_configured_duration(installed, tmp_path):
+    """Regression: a video item shorter than its source must be cut at `duration`.
+
+    Otherwise the picture keeps playing the source while the timeline advances,
+    so the program monitor never changes when the next scene is due.
+    """
+    from app import probe
+
+    v = tmp_path / "long.mp4"
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "testsrc=size=160x120:rate=25:duration=6",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(v)],
+        check=True, timeout=120,
+    )
+    info = probe.probe(v)
+    mid = db.execute(
+        """INSERT INTO media(title, filename, path, kind, size, duration, width, height, fps,
+                             video_codec, audio_codec, has_audio)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("v", "long.mp4", str(v), "video", v.stat().st_size, info["duration"], info["width"],
+         info["height"], info["fps"], info["video_codec"], info["audio_codec"], info["has_audio"]),
+    )
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    # A 6 s video configured to play only 2 s, then a 2 s scene.
+    db.execute("INSERT INTO playlist_items(playlist_id, media_id, position, duration) VALUES(?,?,?,?)", (pid, mid, 0, 2.0))
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s2, 1, 2.0))
+
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    assert items[0]["duration"] == 2.0  # the override wins
+    assert items[0]["source_duration"] == 6.0
+    # A trim needs a decode, so the fast stream-copy path is refused.
+    assert engine._can_stream_copy(items) is False
+    out = tmp_path / "o.mp4"
+    cmd, pipeline = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(out), width=160, height=120, fps=25, realtime=False)
+    )
+    assert pipeline == "filter"
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "trim=duration=2.000" in fc
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    out_info = probe.probe(out)
+    # 2 s (cut) + 2 s (scene) ≈ 4 s, not the 8 s of the full video + scene.
+    assert 3.0 <= out_info["duration"] <= 5.0, out_info["duration"]
+
+
+def test_seek_lands_inside_the_item(installed, tmp_path):
+    """Regression: seeking must resume inside the item, not restart it.
+
+    A seek rotates the target item to the front *and* records a `seek_offset`
+    so the media input starts at the requested point.
+    """
+    from app import probe
+
+    v = tmp_path / "v.mp4"
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "testsrc=size=160x120:rate=25:duration=10",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(v)],
+        check=True, timeout=120,
+    )
+    info = probe.probe(v)
+    mid = db.execute(
+        """INSERT INTO media(title, filename, path, kind, size, duration, width, height, fps,
+                             video_codec, audio_codec, has_audio)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("v", "v.mp4", str(v), "video", v.stat().st_size, info["duration"], info["width"],
+         info["height"], info["fps"], info["video_codec"], info["audio_codec"], info["has_audio"]),
+    )
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute("INSERT INTO playlist_items(playlist_id, media_id, position, duration) VALUES(?,?,?,?)", (pid, mid, 0, 10.0))
+
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    # Simulate a seek to 6 s: rotate (single item stays) + set the offset.
+    first = dict(items[0])
+    first["seek_offset"] = 6.0
+    first["duration"] = 4.0
+    cmd, _ = engine._build_command(
+        [first], OutputConfig(kind="file", file_path=str(tmp_path / "o.mp4"), width=160, height=120, fps=25, realtime=False)
+    )
+    # The input starts 6 s into the source and only plays the remaining 4 s.
+    assert cmd[cmd.index("-ss") + 1] == "6.000"
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "trim=duration=4.000" in fc
+
+
+def test_seek_reports_offset_in_engine(installed, tmp_path):
+    """engine.seek() records the in-item offset on the target item."""
+    s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))
+    s2 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S2", 320, 240, "#000", "[]"))
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s1, 0, 5.0))
+    db.execute("INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)", (pid, s2, 1, 5.0))
+
+    engine = PlaybackEngine()
+    engine._state.running = True
+    engine._desired = {"playlist_id": pid, "items": engine._resolve_items(pid)}
+    # A scene cannot be seeked, so the offset stays 0 (it just restarts).
+    res = engine.seek(7.0)
+    assert res["ok"] is True and res["index"] == 1
+    assert engine._desired["items"][0]["seek_offset"] == 0.0
+
