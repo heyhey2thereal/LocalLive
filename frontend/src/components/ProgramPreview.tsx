@@ -16,6 +16,8 @@ import { fontFamily, fontWeight } from '../lib/fonts'
 import { frameStyle } from '../lib/frames'
 import {
   followMonitorSound,
+  getAudioLevel,
+  getAudioSpectrum,
   isMonitorSoundSelected,
   monitorAudioUrl,
   monitorAudioVolume,
@@ -44,26 +46,44 @@ function Countdown({
   fontPx,
   elapsed = null,
   startedAt = null,
+  background = false,
+  backgroundStart = null,
 }: {
   total: number
   mode: string
   fontPx: number
   elapsed?: number | null
   startedAt?: number | null
+  /** "Continue in background": count on wall-clock time from `backgroundStart`. */
+  background?: boolean
+  backgroundStart?: number | null
 }) {
   const [now, setNow] = useState(0)
   useEffect(() => {
-    if (elapsed !== null || startedAt === null) return
-    const t = window.setInterval(() => setNow(Math.floor((Date.now() - startedAt) / 1000)), 250)
+    if (elapsed !== null || (startedAt === null && !(background && backgroundStart))) return
+    const t = window.setInterval(() => setNow((v) => v + 1), 250)
     return () => window.clearInterval(t)
-  }, [total, mode, elapsed, startedAt])
+  }, [total, mode, elapsed, startedAt, background, backgroundStart])
   // On air: engine elapsed + a local sub-tick. Preview (started): local elapsed.
+  // Background: wall-clock elapsed since the saved start (keeps running off air).
   // Otherwise: frozen on the starting value.
-  const played = elapsed !== null ? elapsed + now : startedAt !== null ? Math.floor((Date.now() - startedAt) / 1000) : 0
+  let played = 0
+  if (elapsed !== null) {
+    played = elapsed + now
+  } else if (background && backgroundStart) {
+    played = Math.max(0, Math.floor(Date.now() / 1000 - backgroundStart))
+  } else if (startedAt !== null) {
+    played = Math.floor((Date.now() - startedAt) / 1000)
+  }
   const secs = mode === 'up' ? total + played : Math.max(0, total - played)
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
-  return <span style={{ fontSize: fontPx }}>{mm}:{ss}</span>
+  return (
+    <span style={{ fontSize: fontPx }}>
+      {mm}:{ss}
+      {background && <span title="Continue en arrière-plan"> ⟳</span>}
+    </span>
+  )
 }
 
 // Live date/time, mirroring the FFmpeg `%{localtime:...}` expansion. The format
@@ -137,6 +157,90 @@ function layerBadge(l: SceneLayer): string | null {
   return null
 }
 
+// Live audio visualiser for the "reactive" layer, drawn in the browser from the
+// monitor sound's analyser (the on-air render is produced by FFmpeg). Falls back
+// to a static label when no audio is playing.
+function ReactiveVisualizer({ layer, width, height }: { layer: SceneLayer; width: number; height: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const kind = layer.visualizer ?? 'spectrum'
+  useEffect(() => {
+    let raf = 0
+    const draw = () => {
+      raf = window.requestAnimationFrame(draw)
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      const bins = getAudioSpectrum()
+      ctx.clearRect(0, 0, width, height)
+      ctx.fillStyle = '#0b0b12'
+      ctx.fillRect(0, 0, width, height)
+      if (!bins) return
+      const n = Math.min(bins.length, 96)
+      const step = Math.max(1, Math.floor(bins.length / n))
+      const bw = width / n
+      for (let i = 0; i < n; i++) {
+        // Average a small band of bins so the bars are stable.
+        let sum = 0
+        for (let k = 0; k < step; k++) sum += bins[i * step + k] ?? 0
+        const v = sum / step / 255
+        const bh = Math.max(1, v * height)
+        // Intensity-based colour, mirroring the FFmpeg "intensity" palette.
+        const hue = 250 - v * 250
+        ctx.fillStyle = `hsl(${hue}, 90%, ${35 + v * 35}%)`
+        if (kind === 'wave') {
+          ctx.fillRect(0, height / 2 - bh / 2, bw - 1, bh)
+        } else {
+          ctx.fillRect(i * bw, height - bh, bw - 1, bh)
+        }
+      }
+    }
+    raf = window.requestAnimationFrame(draw)
+    return () => window.cancelAnimationFrame(raf)
+  }, [kind, width, height])
+  return <canvas ref={canvasRef} width={width} height={height} style={{ width: '100%', height: '100%' }} />
+}
+
+// Audio-reactive scaling for the browser monitor: grows the element when the
+// music gets louder and shrinks it when it calms down, driven by the live
+// analyser (mirrors the on-air FFmpeg envelope scaling). When no audio is
+// playing the elements keep their natural size.
+function useReactiveLayerScale(
+  refs: React.RefObject<Map<number, HTMLElement>>,
+  targets: { index: number; sensitivity?: number | null }[],
+) {
+  const key = targets.map((t) => `${t.index}:${t.sensitivity ?? 1}`).join(',')
+  useEffect(() => {
+    if (targets.length === 0) return
+    let raf = 0
+    const tick = () => {
+      raf = window.requestAnimationFrame(tick)
+      const live = getAudioSpectrum() !== null
+      for (const t of targets) {
+        const el = refs.current?.get(t.index)
+        if (!el) continue
+        if (!live) {
+          el.style.transform = ''
+          continue
+        }
+        const sens = Math.min(Math.max(t.sensitivity ?? 1, 0.1), 5)
+        const amplitude = Math.min(0.6, 0.25 + 0.2 * sens)
+        const base = 1 - amplitude * 0.5
+        el.style.transform = `scale(${(base + amplitude * getAudioLevel()).toFixed(3)})`
+      }
+    }
+    raf = window.requestAnimationFrame(tick)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      for (const t of targets) {
+        const el = refs.current?.get(t.index)
+        if (el) el.style.transform = ''
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+}
+
 export function SceneRender({
   scene,
   media,
@@ -161,6 +265,13 @@ export function SceneRender({
   startedAt?: number | null
 }) {
   const scale = width / scene.width
+  const reactiveRefs = useRef<Map<number, HTMLElement>>(new Map())
+  const reactiveTargets = scene.layers
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => l.type === 'image' || l.type === 'video' || l.type === 'logo')
+    .filter(({ l }) => l.anim_loop === 'audio_reactive')
+    .map(({ l, i }) => ({ index: i, sensitivity: l.audio_sensitivity }))
+  useReactiveLayerScale(reactiveRefs, reactiveTargets)
   return (
     <div
       className="scene-canvas"
@@ -192,7 +303,12 @@ export function SceneRender({
             lh = Math.round(lw * ratio)
           }
           const blur = l.blur ?? 0
-          const anim = animate ? layerAnimation(l, layerDuration, width) : null
+          // The audio-reactive loop is rendered for real by the analyser-driven
+          // scaling below (and by FFmpeg on air), so the static CSS animation is
+          // skipped to avoid the two fighting over `transform`.
+          const anim = animate && l.anim_loop !== 'audio_reactive'
+            ? layerAnimation(l, layerDuration, width)
+            : null
           return (
             <div
               key={i}
@@ -216,11 +332,19 @@ export function SceneRender({
             >
               <span
                 className="scene-layer-inner"
+                ref={(el) => {
+                  if (!reactiveTargets.some((t) => t.index === i)) return
+                  if (el) reactiveRefs.current.set(i, el)
+                  else reactiveRefs.current.delete(i)
+                }}
                 style={{ filter: blur ? `blur(${blur * scale}px)` : undefined, ...(frameStyle(l, scale) ?? {}) }}
               >
                 {isMedia && imgSrc && <img src={imgSrc} alt="" draggable={false} />}
                 {isMedia && !imgSrc && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.type}</span>}
-                {!isMedia && !isBox && badge && (
+                {l.type === 'reactive' && (
+                  <ReactiveVisualizer layer={l} width={Math.max(16, Math.round(lw * scale))} height={Math.max(16, Math.round(lh * scale))} />
+                )}
+                {!isMedia && !isBox && badge && l.type !== 'reactive' && (
                   <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{badge}</span>
                 )}
                 {l.type === 'chat' && <span style={{ fontSize: 12, color: 'var(--text-2)' }}>💬 {l.chat_source ?? 'chat'}</span>}
@@ -231,6 +355,8 @@ export function SceneRender({
                     fontPx={(l.font_size ?? 96) * scale}
                     elapsed={elapsed}
                     startedAt={startedAt}
+                    background={Boolean(l.countdown_background)}
+                    backgroundStart={l.countdown_start ?? null}
                   />
                 )}
                 {l.type === 'clock' && (

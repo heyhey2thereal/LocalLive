@@ -22,6 +22,32 @@ import { fontFamily, fontWeight } from '../lib/fonts'
 import { frameStyle } from '../lib/frames'
 import { formatClock } from './ProgramPreview'
 
+// Countdown preview: when the layer is set to "continue in background" the
+// remaining time is derived from the wall-clock start (so it keeps counting even
+// while the scene is not shown), otherwise the starting value is shown.
+function CountdownPreview({ layer, fontPx }: { layer: SceneLayer; fontPx: number }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!layer.countdown_background || !layer.countdown_start) return
+    const t = window.setInterval(() => tick((v) => v + 1), 500)
+    return () => window.clearInterval(t)
+  }, [layer.countdown_background, layer.countdown_start])
+  const total = layer.countdown_seconds ?? 60
+  let played = 0
+  if (layer.countdown_background && layer.countdown_start) {
+    played = Math.max(0, Math.floor(Date.now() / 1000 - layer.countdown_start))
+  }
+  const secs = layer.countdown_mode === 'up' ? total + played : Math.max(0, total - played)
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0')
+  const ss = String(secs % 60).padStart(2, '0')
+  return (
+    <span style={{ fontSize: fontPx }}>
+      {mm}:{ss}
+      {layer.countdown_background && <span title="Continue en arrière-plan"> ⟳</span>}
+    </span>
+  )
+}
+
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
@@ -410,7 +436,12 @@ export default function SceneCanvas({
                 {isReactive && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Réactif · {l.visualizer}</span>}
                 {isCode && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Code</span>}
                 {isChat && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Chat</span>}
-                {isCountdown && <span style={{ fontSize: (l.font_size ?? 96) * scale * 0.5 }}>{l.countdown_seconds ?? 60}</span>}
+                {isCountdown && (
+                  <CountdownPreview
+                    layer={l}
+                    fontPx={(l.font_size ?? 96) * scale * 0.5}
+                  />
+                )}
                 {isClock && (
                   <span style={{ fontSize: (l.font_size ?? 64) * scale * 0.5 }}>
                     {formatClock(new Date(), l.clock_format ?? '%H:%M', Boolean(l.clock_utc))}

@@ -174,6 +174,10 @@ export interface SceneLayer {
   // countdown layer
   countdown_seconds?: number
   countdown_mode?: 'up' | 'down'
+  /** Keeps counting on wall-clock time even off air. */
+  countdown_background?: boolean
+  /** Epoch (seconds) the countdown was started (background mode). */
+  countdown_start?: number | null
   // clock layer
   clock_format?: string
   clock_utc?: boolean
@@ -216,6 +220,10 @@ export interface CountdownInfo {
   layer_index: number
   seconds: number
   mode: 'up' | 'down'
+  /** "Continue in background" enabled on the countdown layer. */
+  background?: boolean
+  /** Epoch (seconds) the countdown was started (background mode). */
+  start?: number | null
 }
 
 export interface EngineItem {

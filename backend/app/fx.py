@@ -386,7 +386,10 @@ VISUALIZERS: dict[str, dict[str, str]] = {
     "spectrum": {
         "label": "Spectre",
         "description": "Analyse spectrale en couleurs.",
-        "filter": "showspectrum=mode=combined:color=intensity:scale=cbrt",
+        # `fscale=log` spreads the musical range across the whole frame; with the
+        # default linear axis most of the picture stayed black, so the visualiser
+        # looked like it did nothing.
+        "filter": "showspectrum=mode=combined:color=intensity:scale=cbrt:fscale=log",
     },
     "wave": {
         "label": "Oscilloscope",
@@ -396,7 +399,7 @@ VISUALIZERS: dict[str, dict[str, str]] = {
     "bars": {
         "label": "Barres",
         "description": "Barres de fréquences.",
-        "filter": "showfreqs=mode=bar:ascale=cbrt",
+        "filter": "showfreqs=mode=bar:ascale=cbrt:fscale=log",
     },
     "vectorscope": {
         "label": "Vectorscope",

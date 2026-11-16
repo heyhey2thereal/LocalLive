@@ -1007,10 +1007,13 @@ video {
 }
 /* Cycle the text colour itself (filter: hue-rotate does nothing to a white
    text). The stops mirror fx.RAINBOW_COLORS so the monitor matches the engine. */
-/* Audio-reactive loop: the layer "breathes" with the music (approximation). */
+/* Audio-reactive loop: the layer grows when the music gets louder and shrinks
+   when it calms down (mirrors the engine's audio-envelope scaling). The range
+   follows the sensitivity through --ll-audio-min / --ll-audio-max. */
 @keyframes ll-loop-audio {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  0% { transform: rotate(var(--ll-rot, 0deg)) scale(var(--ll-audio-min, 0.78)); }
+  50% { transform: rotate(var(--ll-rot, 0deg)) scale(var(--ll-audio-max, 1.12)); }
+  100% { transform: rotate(var(--ll-rot, 0deg)) scale(var(--ll-audio-min, 0.78)); }
 }
 @keyframes ll-loop-rainbow {
   0%, 100% { color: #ff0040; }

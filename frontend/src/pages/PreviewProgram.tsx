@@ -15,6 +15,8 @@ import { IconArrowRight, IconPlay, IconStop } from '../components/icons'
 import { setMonitorPageVisible } from '../lib/monitorSound'
 import {
   getPreviewSnapshot,
+  getSavedPreviewPlaylist,
+  savePreviewPlaylist,
   setPreviewIndex as setPreviewClockIndex,
   setPreviewPlaylist,
   subscribePreviewClock,
@@ -48,14 +50,18 @@ function CountdownControls({
   const { push } = useToast()
   const [busy, setBusy] = useState(false)
   const seconds = item.countdown?.seconds ?? 60
-  const send = async (action: 'restart' | 'add', amount = 0) => {
+  const background = Boolean(item.countdown?.background)
+  const send = async (action: 'start' | 'restart' | 'add' | 'background', amount = 0, enabled = false) => {
     setBusy(true)
     try {
-      await api.post('/api/broadcast/countdown', { item_id: item.id, action, seconds: amount })
-      push({
-        kind: 'ok',
-        title: action === 'restart' ? 'Compte à rebours relancé' : `+${amount} s ajoutées`,
-      })
+      await api.post('/api/broadcast/countdown', { item_id: item.id, action, seconds: amount, enabled })
+      const titles: Record<string, string> = {
+        start: 'Compte à rebours démarré',
+        restart: 'Compte à rebours relancé',
+        add: `+${amount} s ajoutées`,
+        background: enabled ? 'Le décompte continue en arrière-plan' : 'Décompte remis au premier plan',
+      }
+      push({ kind: 'ok', title: titles[action] })
       onChanged()
     } catch (err: any) {
       push({ kind: 'err', title: 'Compte à rebours impossible', message: err?.message })
@@ -65,14 +71,17 @@ function CountdownControls({
   }
   return (
     <div className="countdown-controls">
-      <span className="text-sm muted-2 nowrap">Compte à rebours · {seconds}s</span>
+      <span className="text-sm muted-2 nowrap">
+        Compte à rebours · {seconds}s{background ? ' · ⟳ fond' : ''}
+      </span>
       <button
         className="btn btn-sm btn-primary"
         disabled={busy}
         onClick={() => {
-          // On air: restart the item so the countdown starts now. In the preview
-          // (or stopped) it just starts the local timer.
-          if (running) void send('restart')
+          // Record the wall-clock start (so a background countdown runs even off
+          // air) and restart the item when it is on air. In the preview it also
+          // starts the local timer.
+          void send('start')
           onStart()
         }}
         title="Démarrer / relancer le décompte"
@@ -89,6 +98,14 @@ function CountdownControls({
           +{amount}s
         </button>
       ))}
+      <button
+        className={`btn btn-sm ${background ? 'btn-primary' : ''}`}
+        disabled={busy}
+        onClick={() => void send('background', 0, !background)}
+        title="Continuer le décompte en arrière-plan (même hors antenne)"
+      >
+        ⟳ Fond
+      </button>
     </div>
   )
 }
@@ -96,7 +113,7 @@ function CountdownControls({
 export default function PreviewProgram() {
   const { push } = useToast()
   const [playlists, setPlaylists] = useState<Playlist[]>([])
-  const [selectedId, setSelectedId] = useState<number | ''>('')
+  const [selectedId, setSelectedId] = useState<number | ''>(() => getSavedPreviewPlaylist() ?? '')
   const [transition, setTransition] = useState('fade')
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [busy, setBusy] = useState(false)
@@ -247,6 +264,7 @@ export default function PreviewProgram() {
         ...(res.live === false ? { message: 'Le direct est arrêté : cliquez sur « Démarrer le direct » pour diffuser.' } : {}),
       })
       setSelectedId(previousProgram ?? '')
+      savePreviewPlaylist(previousProgram ?? null)
       poll.refresh()
     } catch (err: any) {
       push({ kind: 'err', title: 'Prise d’antenne impossible', message: err?.message })
@@ -373,7 +391,12 @@ export default function PreviewProgram() {
             <select
               className="select grow"
               value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : '')}
+              onChange={(e) => {
+                const id = e.target.value ? Number(e.target.value) : ''
+                setSelectedId(id)
+                // Remember the choice so it survives leaving the page.
+                savePreviewPlaylist(id === '' ? null : id)
+              }}
             >
               <option value="">— Choisir une playlist —</option>
               {playlists.map((p) => (

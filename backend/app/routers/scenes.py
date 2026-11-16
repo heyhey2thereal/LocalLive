@@ -57,6 +57,11 @@ class Layer(BaseModel):
     # Countdown layer.
     countdown_seconds: int = 60
     countdown_mode: str = "down"
+    # "Continue in background": the countdown keeps running on wall-clock time
+    # even while its scene is not on the program or in the preview. `start` is
+    # the epoch (seconds) the countdown was started.
+    countdown_background: bool = False
+    countdown_start: float | None = None
     # Clock layer.
     clock_format: str = "%H:%M"
     clock_utc: bool = False

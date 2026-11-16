@@ -38,6 +38,7 @@ type Listener = (state: MonitorSoundState) => void
 
 let element: HTMLAudioElement | null = null
 let gain: GainNode | null = null
+let analyser: AnalyserNode | null = null
 let currentUrl: string | null = null
 let currentSource: MonitorSource | null = null
 let enabled = false
@@ -80,8 +81,16 @@ function ensureElement(): HTMLAudioElement {
       const src = ctx.createMediaElementSource(el)
       const g = ctx.createGain()
       src.connect(g)
-      g.connect(ctx.destination)
+      // An analyser taps the signal so the monitors can render a real, live
+      // spectrum for the "reactive" visualiser layers (the on-air render is
+      // driven by FFmpeg; this is the browser mirror of it).
+      const a = ctx.createAnalyser()
+      a.fftSize = 1024
+      a.smoothingTimeConstant = 0.7
+      g.connect(a)
+      a.connect(ctx.destination)
       gain = g
+      analyser = a
       // A browser keeps the AudioContext suspended until a user gesture.
       const resume = () => void ctx.resume().catch(() => {})
       resume()
@@ -243,6 +252,31 @@ export function stopMonitorSound(): void {
 /** True when `source` is the monitor the operator selected. */
 export function isMonitorSoundSelected(source: MonitorSource): boolean {
   return currentSource === source
+}
+
+/**
+ * Current loudness of the monitor sound, normalised to 0..1. Returns 0 when
+ * nothing is playing or the analyser is unavailable. Used by the monitors to
+ * make "reactive" layers actually react to the music in the browser.
+ */
+export function getAudioLevel(): number {
+  if (!analyser || !element || element.paused) return 0
+  const bins = new Uint8Array(analyser.frequencyBinCount)
+  analyser.getByteFrequencyData(bins)
+  let sum = 0
+  for (let i = 0; i < bins.length; i++) sum += bins[i]
+  return bins.length ? Math.min(1, sum / bins.length / 140) : 0
+}
+
+/**
+ * Live spectrum magnitudes (0..255) for the reactive visualiser, or null when no
+ * audio is available. The array length equals the analyser's bin count.
+ */
+export function getAudioSpectrum(): Uint8Array | null {
+  if (!analyser || !element || element.paused) return null
+  const bins = new Uint8Array(analyser.frequencyBinCount)
+  analyser.getByteFrequencyData(bins)
+  return bins
 }
 
 /**

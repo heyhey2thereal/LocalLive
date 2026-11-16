@@ -652,6 +652,43 @@ class PlaybackEngine:
             self._desired = {"playlist_id": target, "items": items}
             self._terminate_process()  # supervisor restarts with the new playlist
 
+    def _reactive_scale_script(
+        self, audio_src: str | None, lw: int, lh: int, dur: float, sensitivity: Any, n: int, layer_index: int
+    ) -> str | None:
+        """Write a `sendcmd` script that scales a layer with the audio envelope.
+
+        Returns the script path, or None when the audio has no usable envelope
+        (so the caller falls back to the static rendering). The layer grows when
+        the music is loud and shrinks when it calms down; `sensitivity` (0.1..5)
+        sets how pronounced the effect is.
+        """
+        from . import envelope
+
+        if not audio_src:
+            return None
+        points = envelope.loudness_envelope(audio_src)
+        if len(points) < 2:
+            return None
+        sens = float(sensitivity) if isinstance(sensitivity, (int, float)) else 1.0
+        sens = max(0.1, min(sens, 5.0))
+        # 0.7x .. 1.3x at sensitivity 1; a higher sensitivity deepens the range.
+        amplitude = min(0.6, 0.25 + 0.2 * sens)
+        base = 1.0 - amplitude * 0.5
+        lines: list[str] = []
+        for seconds, level in points:
+            factor = max(0.2, base + amplitude * level)
+            w = max(2, int(round(lw * factor)))
+            h = max(2, int(round(lh * factor)))
+            lines.append(f"{seconds:.3f} scale width {w};\n{seconds:.3f} scale height {h};\n")
+        script = "".join(lines)
+        try:
+            config.TMP_DIR.mkdir(parents=True, exist_ok=True)
+            path = config.TMP_DIR / f"reactive-{n}-{layer_index}.cmd"
+            path.write_text(script, encoding="utf-8")
+        except OSError:
+            return None
+        return str(path)
+
     def _terminate_process(self) -> None:
         process = self._process
         if process and process.poll() is None:
@@ -1060,13 +1097,22 @@ class PlaybackEngine:
             # A clock counting down (or up) from `countdown_seconds`. `t` is the
             # time since the layer went on air, so the timer starts exactly when
             # the scene reaches the program (no need to pre-set anything).
-            # Formatted MM:SS for readability. No background box by default.
+            # "Continue in background": when the layer carries a wall-clock start
+            # (`countdown_start`), the elapsed time is added so the timer keeps
+            # counting even while the scene is not on the program or in the
+            # preview. Formatted MM:SS for readability.
             total = int(layer.get("countdown_seconds") or 60)
             mode = layer.get("countdown_mode") or "down"
+            offset = 0
+            if layer.get("countdown_background") and layer.get("countdown_start"):
+                try:
+                    offset = max(0, int(time.time() - float(layer["countdown_start"])))
+                except (TypeError, ValueError):
+                    offset = 0
             if mode == "down":
-                secs = f"max(0\\,{total}-floor(t))"
+                secs = f"max(0\\,{total}-({offset}+floor(t)))"
             else:
-                secs = f"{total}+floor(t)"
+                secs = f"{total}+{offset}+floor(t)"
             # MM:SS with zero-padding: eif supports a width field (e.g. :d:2).
             # The literal colon between the two expressions must be escaped so
             # the filter_complex parser does not treat it as an option separator.
@@ -1197,6 +1243,38 @@ class PlaybackEngine:
                 li = add_input(["-t", f"{dur:.3f}", "-i", media["path"]])
             lw = int(layer.get("width") or w)
             lh = int(layer.get("height") or h)
+            # "Reactive to music": the layer genuinely grows when the music gets
+            # louder and shrinks when it calms down (instead of flashing). We
+            # measure the item's loudness envelope ahead of time and turn it into
+            # a `sendcmd` script that scales the layer over time. The scale is
+            # bounded by a box 1.5x the layer size so a loud passage can grow
+            # beyond the nominal size, and the box is centred on the layer.
+            reactive = (layer.get("anim_loop") or "none") == "audio_reactive"
+            if reactive:
+                audio_src = item.get("background_audio_path")
+                if not audio_src and item.get("kind") == "video" and item.get("has_audio"):
+                    audio_src = item.get("path")
+                script = self._reactive_scale_script(
+                    audio_src, lw, lh, dur, layer.get("audio_sensitivity"), n, layer_index
+                )
+                if script:
+                    box_w = int(lw * 1.5)
+                    box_h = int(lh * 1.5)
+                    pad_x = max(0, (box_w - lw) // 2)
+                    pad_y = max(0, (box_h - lh) // 2)
+                    # Scale the source to the *layer* size, then pad it into the
+                    # larger (transparent) box. sendcmd grows/shrinks the scaled
+                    # image inside that box; the pad re-centres it every frame.
+                    chain = (
+                        f"sendcmd=f={script},scale={lw}:{lh},format=rgba,"
+                        f"colorchannelmixer=aa={opacity:.3f},"
+                        f"pad={box_w}:{box_h}:(ow-iw)/2:(oh-ih)/2:color=black@0:eval=frame"
+                    )
+                    filters.append(f"[{li}:v]{chain}[lyr{n}_{layer_index}]")
+                    filters.append(
+                        f"{src}[lyr{n}_{layer_index}]overlay={max(0, x - pad_x)}:{max(0, y - pad_y)}:shortest=1{out_label}"
+                    )
+                    return True
             # The editor lets the operator drag a layer's edges freely, so the
             # image must fill the box it was given (stretch), not letterbox
             # inside it: a stretched image looks exactly like the editor.
@@ -1258,6 +1336,8 @@ def _countdown_descriptor(item: dict[str, Any]) -> dict[str, Any] | None:
                 "layer_index": idx,
                 "seconds": int(layer.get("countdown_seconds") or 60),
                 "mode": layer.get("countdown_mode") or "down",
+                "background": bool(layer.get("countdown_background")),
+                "start": float(layer["countdown_start"]) if layer.get("countdown_start") else None,
             }
     return None
 

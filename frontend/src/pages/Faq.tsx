@@ -134,6 +134,18 @@ const SECTIONS: Section[] = [
         a: "Choisissez l'animation de boucle « Réactif à la musique », puis réglez la « Sensibilité à la musique » : plus la valeur est haute, plus le calque réagit fort.",
       },
       {
+        q: 'Comment faire grossir une image au rythme de la musique ?',
+        a: "Sur un calque Image (ou Logo/Vidéo), choisissez l'animation de boucle « Réactif à la musique » : l'image grandit quand la musique monte et rétrécit quand elle baisse. La sensibilité règle l'amplitude. À l'antenne, le moteur mesure le volume réel de la musique de fond de l'élément (ou le son de la vidéo).",
+      },
+      {
+        q: 'Mon spectre (calque « Réactif ») était tout noir, pourquoi ?',
+        a: "L'axe des fréquences était linéaire : presque toute l'énergie musicale tenait dans une fine bande. Il est maintenant logarithmique, donc le spectre et les barres remplissent le cadre. Dans l'aperçu, le spectre est aussi dessiné en direct à partir du son du moniteur.",
+      },
+      {
+        q: 'Comment garder un compte à rebours qui continue même hors antenne ?',
+        a: "Sur le calque Compte à rebours, cochez « Continuer en arrière-plan » (ou cliquez sur « ⟳ Fond » sous le moniteur). Le décompte suit alors l'horloge réelle : il continue même quand la scène n'est ni en programme ni dans l'aperçu. Désactivé, il repart du début à chaque passage à l'antenne.",
+      },
+      {
         q: 'Pourquoi mes visuels réactifs ne bougeaient-ils pas ?',
         a: "Ils étaient alimentés par du silence. Désormais un calque réactif réagit à la musique de fond de l'élément (ou au son de la vidéo s'il n'y a pas de musique).",
       },

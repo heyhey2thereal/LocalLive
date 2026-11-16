@@ -35,12 +35,15 @@ function sync(now: number): void {
     return
   }
   if (index >= items.length) index = 0
+  const before = index
   // The guard stops a pathological (zero-length) list from spinning forever.
   let guard = 0
   while (guard++ < 100000 && now - itemStartedAt >= itemSeconds(index) * 1000) {
     itemStartedAt += itemSeconds(index) * 1000
     index = (index + 1) % items.length
   }
+  // Persist the advanced position so a full reload restores the same item.
+  if (index !== before) savePreviewIndex(index)
 }
 
 function notify(): void {
@@ -73,7 +76,10 @@ export function setPreviewPlaylist(id: number | null, list: EngineItem[]): void 
   playlistId = id
   items = list
   if (changed) {
-    index = 0
+    // Restore the item the operator last picked for this playlist (persisted
+    // across navigation and reloads) instead of always starting at the first.
+    const saved = getSavedPreviewIndex()
+    index = list.length > 0 ? ((saved % list.length) + list.length) % list.length : 0
     itemStartedAt = Date.now()
   } else {
     sync(Date.now())
@@ -86,5 +92,51 @@ export function setPreviewIndex(i: number): void {
   const count = Math.max(items.length, 1)
   index = ((i % count) + count) % count
   itemStartedAt = Date.now()
+  savePreviewIndex(index)
   notify()
+}
+
+// ---------------------------------------------------------------------------
+// Persisted preview selection
+// ---------------------------------------------------------------------------
+// The playlist chosen for the preview monitor and the item the operator picked
+// are remembered in localStorage, so leaving the page (or reloading) restores
+// the same selection instead of falling back to the first item.
+const LS_PLAYLIST = 'locallive.preview.playlist'
+const LS_INDEX = 'locallive.preview.index'
+
+export function getSavedPreviewPlaylist(): number | null {
+  try {
+    const v = localStorage.getItem(LS_PLAYLIST)
+    return v ? Number(v) : null
+  } catch {
+    return null
+  }
+}
+
+export function savePreviewPlaylist(id: number | null): void {
+  try {
+    if (id == null) localStorage.removeItem(LS_PLAYLIST)
+    else localStorage.setItem(LS_PLAYLIST, String(id))
+  } catch {
+    /* storage may be unavailable (private mode); the in-memory state still works */
+  }
+}
+
+function savePreviewIndex(i: number): void {
+  try {
+    localStorage.setItem(LS_INDEX, String(i))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** The item index the operator last had selected (0 when unknown). */
+export function getSavedPreviewIndex(): number {
+  try {
+    const v = localStorage.getItem(LS_INDEX)
+    return v ? Math.max(0, Number(v)) : 0
+  } catch {
+    return 0
+  }
 }

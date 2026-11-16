@@ -626,7 +626,25 @@ export default function Scenes() {
                         </select>
                       </div>
                     </div>
-                    <span className="hint">Rendu par FFmpeg (drawtext avec expression temporelle).</span>
+                    <label className="flex items-center gap-8 mt-8">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(layer.countdown_background)}
+                        onChange={(e) =>
+                          updateLayer(selectedLayer!, {
+                            countdown_background: e.target.checked,
+                            // Start counting right away when enabling; clear when disabling.
+                            countdown_start: e.target.checked ? Math.floor(Date.now() / 1000) : null,
+                          })
+                        }
+                      />
+                      <span className="text-sm muted">Continuer en arrière-plan</span>
+                    </label>
+                    <span className="hint">
+                      Le décompte continue même quand la scène n'est ni en programme ni dans
+                      l'aperçu (il suit l'horloge réelle). Désactivé, il repart au début
+                      chaque fois que la scène arrive à l'antenne.
+                    </span>
                   </div>
                 )}
 
@@ -912,7 +930,11 @@ export default function Scenes() {
                       value={layer.audio_sensitivity ?? 1}
                       onChange={(e) => updateLayer(selectedLayer!, { audio_sensitivity: Number(e.target.value) })}
                     />
-                    <span className="hint">Plus la valeur est haute, plus le calque réagit fort à la musique.</span>
+                    <span className="hint">
+                      Plus la valeur est haute, plus l'élément grandit quand la musique est
+                      forte et rétrécit quand elle baisse (il réagit à la musique de fond de
+                      l'élément, ou au son de la vidéo).
+                    </span>
                   </div>
                 )}
 

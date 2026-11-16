@@ -3,6 +3,30 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.15.2] — 2026-11-16
+
+### Corrigé
+- **Sélection de l’aperçu conservée** : la playlist choisie dans l’aperçu et
+  l’élément sélectionné sont désormais mémorisés (localStorage). En quittant la
+  page puis en y revenant — ou après un rechargement — l’aperçu revient sur le
+  **même élément** au lieu de repartir du premier.
+- **Visuels réactifs (spectre) invisibles** : l’axe des fréquences était
+  **linéaire**, donc l’énergie musicale n’occupait qu’une bande étroite et
+  presque tout restait noir. Le spectre et les barres utilisent maintenant une
+  échelle **logarithmique** (`fscale=log`) : le rendu remplit le cadre.
+- **Image « réactive à la musique »** : l’animation ne faisait que **clignoter**
+  (opacité) et ne dépendait pas réellement de la musique. Elle **grandit
+  maintenant quand la musique monte et rétrécit quand elle baisse** :
+  * à l’antenne, le moteur mesure l’**enveloppe de volume** de l’audio (astats)
+    et fait varier la taille du calque au rythme réel (`sendcmd` + `scale`), avec
+    un recentrage automatique ;
+  * dans l’interface, un **analyseur audio** (Web Audio) pilote la taille en
+    direct ; le spectre du calque « Réactif » est aussi dessiné en direct.
+- **Compte à rebours « continuer en arrière-plan »** : nouvelle option par calque
+  (éditeur de scène **et** bouton « ⟳ Fond » sous le moniteur). Activée, le
+  décompte suit l’**horloge réelle** et continue même quand la scène n’est ni au
+  programme ni dans l’aperçu ; désactivée, il repart au début à chaque passage.
+
 ## [2.15.1] — 2026-11-15
 
 ### Corrigé

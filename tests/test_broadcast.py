@@ -163,7 +163,12 @@ def test_countdown_descriptor_exposed_in_preview(authed):
     pid, _ = _make_countdown_playlist(authed, 45)
     data = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()
     item = data["preview"]["items"][0]
-    assert item["countdown"] == {"layer_index": 0, "seconds": 45, "mode": "down"}
+    cd = item["countdown"]
+    assert cd["layer_index"] == 0
+    assert cd["seconds"] == 45
+    assert cd["mode"] == "down"
+    assert cd["background"] is False
+    assert cd["start"] is None
 
 
 def test_countdown_add_time_persists_on_scene(authed):
@@ -197,6 +202,43 @@ def test_countdown_unknown_item_and_missing_layer(authed):
 
 def test_countdown_requires_capability(installed):
     assert installed.post("/api/broadcast/countdown", json={"item_id": 1, "action": "add", "seconds": 10}).status_code == 401
+
+
+def test_countdown_start_and_background_toggle(authed):
+    """Starting a countdown records the wall-clock start; background toggles it."""
+    pid, sid = _make_countdown_playlist(authed, 90)
+    item = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]
+
+    # Enabling "continue in background" records a start time on the scene.
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "background", "enabled": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["background"] is True
+    scene = authed.get(f"/api/scenes/{sid}").json()
+    assert scene["layers"][0]["countdown_background"] is True
+    assert scene["layers"][0]["countdown_start"]
+
+    # The descriptor now reports it so the monitor can show the ⟳ badge.
+    cd = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]["countdown"]
+    assert cd["background"] is True and cd["start"]
+
+    # Starting records a fresh wall-clock start.
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "start"})
+    assert r.status_code == 200, r.text
+    assert r.json()["started"] is True
+
+    # Turning it off clears the start.
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "background", "enabled": False})
+    assert r.json()["background"] is False
+    scene = authed.get(f"/api/scenes/{sid}").json()
+    assert scene["layers"][0]["countdown_background"] is False
+    assert scene["layers"][0]["countdown_start"] is None
+
+
+def test_visualizers_use_log_frequency_scale():
+    """Regression: the spectrum/bars looked empty with a linear frequency axis."""
+    from app import fx
+    assert "fscale=log" in fx.VISUALIZERS["spectrum"]["filter"]
+    assert "fscale=log" in fx.VISUALIZERS["bars"]["filter"]
 
 
 def test_countdown_controls_apply_while_running(authed, tmp_path):

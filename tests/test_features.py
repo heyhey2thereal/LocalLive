@@ -543,6 +543,150 @@ def test_audio_reactive_loop_expression():
     assert "sin(" in motion["alpha"]
 
 
+def _make_white_image(path: Path):
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "color=c=white:size=160x160:duration=1", "-frames:v", "1", str(path)],
+        check=True, timeout=60,
+    )
+
+
+def _make_music(path: Path, seconds: float = 3.0):
+    """Loudness-varying music-like audio (a clear beat envelope)."""
+    subprocess.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "aevalsrc='(0.1+0.9*abs(sin(2*PI*1.5*t)))*(0.5*sin(220*2*PI*t)+0.3*sin(440*2*PI*t))':"
+               f"d={seconds}:s=48000",
+         "-ac", "2", str(path)],
+        check=True, timeout=60,
+    )
+
+
+def test_loudness_envelope_is_normalised_and_varying(tmp_path):
+    """The audio envelope must vary with loudness (0..1), not be flat."""
+    from app import envelope
+    music = tmp_path / "m.wav"
+    _make_music(music)
+    points = envelope.loudness_envelope(music)
+    assert len(points) >= 4
+    levels = [lv for _, lv in points]
+    assert min(levels) >= 0.0 and max(levels) <= 1.0
+    # A beat must produce a real spread, otherwise the layer could not react.
+    assert max(levels) - min(levels) > 0.2
+
+
+def test_loudness_envelope_missing_file_is_empty(tmp_path):
+    from app import envelope
+    assert envelope.loudness_envelope(tmp_path / "nope.wav") == []
+
+
+def test_reactive_image_scales_with_music(installed, tmp_path):
+    """An image with the audio-reactive loop must grow/shrink with the music."""
+    img = tmp_path / "sq.png"
+    _make_white_image(img)
+    music = tmp_path / "m.wav"
+    _make_music(music)
+    imid = db.execute(
+        """INSERT INTO media(title, filename, path, kind, size, duration, width, height, has_audio)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        ("sq", "sq.png", str(img), "image", img.stat().st_size, 0, 160, 160, 0),
+    )
+    mid = db.execute(
+        """INSERT INTO media(title, filename, path, kind, size, duration, has_audio)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("m", "m.wav", str(music), "audio", music.stat().st_size, 3.0, 1),
+    )
+    layers = [{
+        "type": "image", "media_id": imid, "x": 80, "y": 60, "width": 160, "height": 120,
+        "anim_loop": "audio_reactive", "audio_sensitivity": 2.0,
+    }]
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        ("S", 320, 240, "#000", __import__("json").dumps(layers)),
+    )
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration, background_audio_id, background_volume) "
+        "VALUES(?,?,?,?,?,?)",
+        (pid, sid, 0, 3.0, mid, 1.0),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    out = tmp_path / "o.mp4"
+    cmd, _ = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(out), width=320, height=240, fps=25, realtime=False)
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "sendcmd=" in fc and "reactive-" in fc
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    # Probe several frames and check the white square's size actually varies.
+    widths = []
+    for n in (4, 16, 28, 40, 52, 64):
+        png = tmp_path / f"f{n}.png"
+        subprocess.run(
+            [config.FFMPEG_BIN, "-y", "-v", "error", "-i", str(out),
+             "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", str(png)],
+            check=True, timeout=60,
+        )
+        raw = subprocess.run(
+            [config.FFMPEG_BIN, "-v", "error", "-i", str(png), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True,
+        ).stdout
+        row = (120) * 320 * 3
+        widths.append(sum(1 for c in range(320) if raw[row + c * 3] > 200 and raw[row + c * 3 + 1] > 200))
+    assert max(widths) - min(widths) > 8, widths
+
+
+def test_countdown_background_offsets_expression(installed, tmp_path):
+    """A background countdown adds the wall-clock elapsed time to the timer."""
+    import json
+    import time as _time
+    layers = [{
+        "type": "countdown", "countdown_seconds": 60, "countdown_mode": "down",
+        "countdown_background": True, "countdown_start": _time.time() - 30,
+    }]
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        ("S", 320, 240, "#000", json.dumps(layers)),
+    )
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)",
+        (pid, sid, 0, 2.0),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    cmd, _ = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(tmp_path / "o.mp4"), width=320, height=240, fps=25, realtime=False)
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    # 60 s total, 30 s already elapsed -> the expression carries the 30 s offset.
+    assert "60-(30+floor(t))" in fc
+
+
+def test_countdown_without_background_starts_at_total(installed, tmp_path):
+    import json
+    layers = [{"type": "countdown", "countdown_seconds": 45, "countdown_mode": "down"}]
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        ("S", 320, 240, "#000", json.dumps(layers)),
+    )
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)",
+        (pid, sid, 0, 2.0),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    cmd, _ = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(tmp_path / "o.mp4"), width=320, height=240, fps=25, realtime=False)
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "45-(0+floor(t))" in fc
+
+
+
 def test_engine_seek_and_reload(installed):
     from app.engine import PlaybackEngine
     s1 = db.execute("INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)", ("S1", 320, 240, "#000", "[]"))

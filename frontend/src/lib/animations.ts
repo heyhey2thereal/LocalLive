@@ -149,9 +149,20 @@ export function layerAnimation(
   }
   if (animations.length === 0) return null
 
+  // Audio-reactive loop: mirror the engine's scaling range (which depends on the
+  // sensitivity) so the monitor grows/shrinks like the on-air render.
+  const audioVars: Record<string, string> = {}
+  if (animLoop === 'audio_reactive') {
+    const sens = Math.min(Math.max(layer.audio_sensitivity ?? 1, 0.1), 5)
+    const amplitude = Math.min(0.6, 0.25 + 0.2 * sens)
+    audioVars['--ll-audio-min'] = String(Math.max(0.3, 1 - amplitude / 2).toFixed(3))
+    audioVars['--ll-audio-max'] = String(Math.min(1.6, 1 + amplitude / 2).toFixed(3))
+  }
+
   const style = {
     animation: animations.join(', '),
     ['--ll-rot']: `${layer.rotation ?? 0}deg`,
+    ...audioVars,
     ...(canvasWidth > 0 ? { ['--ll-marquee']: `${Math.round(canvasWidth)}px` } : {}),
   } as CSSProperties
 
