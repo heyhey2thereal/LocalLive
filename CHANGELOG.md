@@ -3,6 +3,45 @@
 Le format suit [Semantic Versioning](https://semver.org/lang/fr/) :
 `MAJEUR.MINEUR.CORRECTIF`. La version courante est dans le fichier `VERSION`.
 
+## [2.16.0] — 2026-11-16
+
+### Corrigé
+- **Mise à jour qui plantait** : une commande mal formée (guillemets non
+  fermés) provoquait une erreur 500 ; les sorties non UTF-8 ou un chemin non
+  exécutable échouaient aussi brutalement. L'API renvoie désormais un message
+  clair (mise à jour manuelle requise) au lieu de planter.
+- **Console de mise à jour** : la fenêtre « Mise à jour » affiche maintenant la
+  **sortie de la console** en direct (git, copie du code, pip, compilation,
+  redémarrage) via `GET /api/system/update/log`. En cas d'échec, la fenêtre
+  reste ouverte avec le détail au lieu de se fermer.
+- **Sélection de l'aperçu** (déjà en 2.15.2) : confirmée et conservée.
+
+### Ajouté
+- **Volume du moniteur** : un curseur de volume dans la console de son (en bas
+  de l'aperçu) règle ce que l'opérateur entend, sans toucher au mix diffusé.
+- **Fondu d'entrée / de sortie par élément de playlist** (durée en secondes) :
+  le son de l'élément monte en douceur au début et redescend à la fin
+  (`afade`). Réglable dans « Transition et musique » de chaque élément.
+- **Compte à rebours en pause** : nouveau bouton « ⏸ Pause / ▶ Reprendre » sous
+  le moniteur et case « En pause » dans l'éditeur de scène. Le décompte se fige
+  et reprend là où il s'est arrêté (il continue de suivre l'horloge réelle).
+- **Sensibilité de la réaction à la musique** : le curseur de sensibilité agit
+  désormais réellement (amplitude de mise à l'échelle de l'image **et** gain de
+  l'analyse du visualiseur « Réactif »).
+
+### Modifié
+- **Étirement d'une image hors cadre** : un calque image/logo/vidéo peut être
+  redimensionné **au-delà du cadre** (il est découpé à l'antenne, comme les
+  autres éléments hors cadre). La limite précédente bloquait le
+  redimensionnement à la taille de la scène.
+- **Musique de l'aperçu** : la console de son suit maintenant **l'élément
+  affiché dans l'aperçu** (elle avance avec la musique et change de piste quand
+  l'aperçu passe à l'élément suivant), et reste le contrôle de la musique
+  courante (pause/reprise du direct, reculer/avancer).
+- **Animation « Réactif à la musique » dans l'éditeur** : elle n'est plus jouée
+  comme démonstration au survol (elle dépend de la musique réelle, pas d'une
+  animation factice).
+
 ## [2.15.2] — 2026-11-16
 
 ### Corrigé

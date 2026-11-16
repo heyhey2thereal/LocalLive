@@ -119,6 +119,10 @@ export interface PlaylistItem {
   background_audio_title: string | null
   background_volume: number
   background_audio_continue: boolean
+  /** Fade in of the item's audio (seconds); 0 disables it. */
+  fade_in: number
+  /** Fade out of the item's audio (seconds); 0 disables it. */
+  fade_out: number
 }
 
 export interface Playlist {
@@ -178,6 +182,10 @@ export interface SceneLayer {
   countdown_background?: boolean
   /** Epoch (seconds) the countdown was started (background mode). */
   countdown_start?: number | null
+  /** Seconds already run (accumulated when paused / restarted). */
+  countdown_elapsed?: number
+  /** Frozen: the timer stops advancing. */
+  countdown_paused?: boolean
   // clock layer
   clock_format?: string
   clock_utc?: boolean
@@ -224,6 +232,10 @@ export interface CountdownInfo {
   background?: boolean
   /** Epoch (seconds) the countdown was started (background mode). */
   start?: number | null
+  /** Frozen: the timer stops advancing. */
+  paused?: boolean
+  /** Seconds already run (accumulated when paused / restarted). */
+  elapsed?: number
 }
 
 export interface EngineItem {
@@ -241,6 +253,10 @@ export interface EngineItem {
   background_volume?: number
   /** Item keeps the previous item's music (does not start its own). */
   background_audio_continue?: boolean
+  /** Fade in of the item's audio (seconds). */
+  fade_in?: number
+  /** Fade out of the item's audio (seconds). */
+  fade_out?: number
   /** First countdown layer of a scene item, when it has one. */
   countdown?: CountdownInfo | null
   exists: boolean

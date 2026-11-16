@@ -143,6 +143,10 @@ _MIGRATIONS = [
             # When set, the item keeps playing the previous item's background
             # music instead of starting its own (music continues across items).
             "background_audio_continue": "INTEGER NOT NULL DEFAULT 0",
+            # Fade in / fade out (seconds) applied to the item's audio, so an
+            # element can enter/leave smoothly instead of cutting abruptly.
+            "fade_in": "REAL NOT NULL DEFAULT 0",
+            "fade_out": "REAL NOT NULL DEFAULT 0",
         },
     ),
     (

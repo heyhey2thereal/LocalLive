@@ -57,6 +57,9 @@ const NEW_LAYER = (type: LayerType, z: number): SceneLayer => {
     chat_lines: type === 'chat' ? 8 : undefined,
     countdown_seconds: type === 'countdown' ? 60 : undefined,
     countdown_mode: type === 'countdown' ? 'down' : undefined,
+    countdown_background: type === 'countdown' ? false : undefined,
+    countdown_elapsed: type === 'countdown' ? 0 : undefined,
+    countdown_paused: type === 'countdown' ? false : undefined,
     clock_format: type === 'clock' ? '%H:%M' : undefined,
     clock_utc: type === 'clock' ? false : undefined,
     feed_url: type === 'ticker' ? '' : undefined,
@@ -123,17 +126,17 @@ export default function Scenes() {
     setSelectedLayer(null)
   }
 
-  // Keep a stored layer's size sane (never below 8px, never bigger than the
-  // frame) but leave its position free: an element is allowed to sit outside the
+  // Keep a stored layer's size sane (never below 8px) but leave its position and
+  // size free otherwise: an element is allowed to sit or extend outside the
   // frame. Normalising on open guarantees a box is never zero-sized.
-  const normalizeLayer = (l: SceneLayer, w: number, h: number): SceneLayer => {
-    const width = Math.max(8, Math.min(l.width ?? Math.round(w * 0.25), w))
-    const height = Math.max(8, Math.min(l.height ?? Math.round((l.width ?? w * 0.25) * 9 / 16), h))
+  const normalizeLayer = (l: SceneLayer, w: number): SceneLayer => {
+    const width = Math.max(8, l.width ?? Math.round(w * 0.25))
+    const height = Math.max(8, l.height ?? Math.round((l.width ?? w * 0.25) * 9 / 16))
     return { ...l, width, height }
   }
 
   const openScene = (s: Scene) =>
-    setEditing({ ...s, layers: s.layers.map((l) => normalizeLayer(l, s.width, s.height)) })
+    setEditing({ ...s, layers: s.layers.map((l) => normalizeLayer(l, s.width)) })
 
   const setLayers = (layers: SceneLayer[]) => {
     if (editing) setEditing({ ...editing, layers })
@@ -573,6 +576,26 @@ export default function Scenes() {
                   </div>
                 )}
 
+                {layer.type === 'reactive' && (
+                  <div className="field">
+                    <label>Sensibilité à la musique ({layer.audio_sensitivity ?? 1})</label>
+                    <input
+                      className="input"
+                      type="range"
+                      min={0.1}
+                      max={5}
+                      step={0.1}
+                      value={layer.audio_sensitivity ?? 1}
+                      onChange={(e) => updateLayer(selectedLayer!, { audio_sensitivity: Number(e.target.value) })}
+                    />
+                    <span className="hint">
+                      Amplifie l'analyse audio du visualiseur : plus la valeur est haute, plus
+                      le spectre est vif. La source est la musique de fond de l'élément (ou le
+                      son de la vidéo).
+                    </span>
+                  </div>
+                )}
+
                 {layer.type === 'chat' && (
                   <div className="field" style={{ gridColumn: 'span 3' }}>
                     <label>Source du chat (Twitch, YouTube, relais…)</label>
@@ -640,10 +663,38 @@ export default function Scenes() {
                       />
                       <span className="text-sm muted">Continuer en arrière-plan</span>
                     </label>
+                    <label className="flex items-center gap-8 mt-8">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(layer.countdown_paused)}
+                        onChange={(e) => {
+                          const now = Math.floor(Date.now() / 1000)
+                          if (e.target.checked) {
+                            // Freeze: accumulate the elapsed time up to now.
+                            const base = layer.countdown_elapsed ?? 0
+                            const ran = layer.countdown_start
+                              ? Math.max(0, now - layer.countdown_start)
+                              : 0
+                            updateLayer(selectedLayer!, {
+                              countdown_paused: true,
+                              countdown_elapsed: base + ran,
+                            })
+                          } else {
+                            // Resume: restart the clock from now.
+                            updateLayer(selectedLayer!, {
+                              countdown_paused: false,
+                              countdown_start: now,
+                            })
+                          }
+                        }}
+                      />
+                      <span className="text-sm muted">En pause</span>
+                    </label>
                     <span className="hint">
                       Le décompte continue même quand la scène n'est ni en programme ni dans
                       l'aperçu (il suit l'horloge réelle). Désactivé, il repart au début
-                      chaque fois que la scène arrive à l'antenne.
+                      chaque fois que la scène arrive à l'antenne. « En pause » fige le
+                      décompte (il reprend là où il s'est arrêté).
                     </span>
                   </div>
                 )}

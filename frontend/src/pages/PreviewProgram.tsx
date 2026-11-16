@@ -51,7 +51,12 @@ function CountdownControls({
   const [busy, setBusy] = useState(false)
   const seconds = item.countdown?.seconds ?? 60
   const background = Boolean(item.countdown?.background)
-  const send = async (action: 'start' | 'restart' | 'add' | 'background', amount = 0, enabled = false) => {
+  const paused = Boolean(item.countdown?.paused)
+  const send = async (
+    action: 'start' | 'restart' | 'add' | 'background' | 'pause' | 'resume',
+    amount = 0,
+    enabled = false,
+  ) => {
     setBusy(true)
     try {
       await api.post('/api/broadcast/countdown', { item_id: item.id, action, seconds: amount, enabled })
@@ -60,6 +65,8 @@ function CountdownControls({
         restart: 'Compte à rebours relancé',
         add: `+${amount} s ajoutées`,
         background: enabled ? 'Le décompte continue en arrière-plan' : 'Décompte remis au premier plan',
+        pause: 'Compte à rebours en pause',
+        resume: 'Compte à rebours repris',
       }
       push({ kind: 'ok', title: titles[action] })
       onChanged()
@@ -73,6 +80,7 @@ function CountdownControls({
     <div className="countdown-controls">
       <span className="text-sm muted-2 nowrap">
         Compte à rebours · {seconds}s{background ? ' · ⟳ fond' : ''}
+        {paused ? ' · ⏸ pause' : ''}
       </span>
       <button
         className="btn btn-sm btn-primary"
@@ -87,6 +95,14 @@ function CountdownControls({
         title="Démarrer / relancer le décompte"
       >
         ▶ Démarrer
+      </button>
+      <button
+        className="btn btn-sm"
+        disabled={busy}
+        onClick={() => void send(paused ? 'resume' : 'pause')}
+        title={paused ? 'Reprendre le décompte' : 'Mettre le décompte en pause'}
+      >
+        {paused ? '▶ Reprendre' : '⏸ Pause'}
       </button>
       {running && (
         <button className="btn btn-sm" disabled={busy} onClick={() => void send('restart')} title="Relancer le décompte">
@@ -541,9 +557,10 @@ export default function PreviewProgram() {
         </div>
       )}
 
-      {/* Sound console: follows the program when on air, else the preview. */}
+      {/* Sound console: the control of the current music (program on air, else
+          the preview item). Shown whenever there is music to control. */}
       {((preview && preview.items.length > 0) || running) && (
-        <MusicBar items={preview?.items ?? []} program={program ?? null} onChanged={poll.refresh} />
+        <MusicBar item={previewItem} program={program ?? null} onChanged={poll.refresh} />
       )}
 
       {showHelp && (

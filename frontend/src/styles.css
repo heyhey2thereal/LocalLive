@@ -460,6 +460,12 @@ video {
   margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .music-bar-seek { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.music-bar-volume {
+  display: flex; align-items: center; gap: 6px; flex: none; color: var(--text-2);
+}
+.music-bar-volume input[type='range'] {
+  width: 90px; accent-color: var(--accent); cursor: pointer;
+}
 .switcher-arrow { display: flex; align-items: center; justify-content: center; }
 .switcher-arrow-btn {
   width: 52px; height: 52px; border-radius: 50%; cursor: pointer;

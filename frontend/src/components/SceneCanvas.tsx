@@ -24,18 +24,21 @@ import { formatClock } from './ProgramPreview'
 
 // Countdown preview: when the layer is set to "continue in background" the
 // remaining time is derived from the wall-clock start (so it keeps counting even
-// while the scene is not shown), otherwise the starting value is shown.
+// while the scene is not shown), otherwise the starting value is shown. A paused
+// countdown is frozen at the accumulated `countdown_elapsed`.
 function CountdownPreview({ layer, fontPx }: { layer: SceneLayer; fontPx: number }) {
   const [, tick] = useState(0)
+  const live = layer.countdown_background && layer.countdown_start && !layer.countdown_paused
   useEffect(() => {
-    if (!layer.countdown_background || !layer.countdown_start) return
+    if (!live) return
     const t = window.setInterval(() => tick((v) => v + 1), 500)
     return () => window.clearInterval(t)
-  }, [layer.countdown_background, layer.countdown_start])
+  }, [live, layer.countdown_start])
   const total = layer.countdown_seconds ?? 60
-  let played = 0
-  if (layer.countdown_background && layer.countdown_start) {
-    played = Math.max(0, Math.floor(Date.now() / 1000 - layer.countdown_start))
+  const base = layer.countdown_elapsed ?? 0
+  let played = base
+  if (live) {
+    played = base + Math.max(0, Math.floor(Date.now() / 1000 - (layer.countdown_start as number)))
   }
   const secs = layer.countdown_mode === 'up' ? total + played : Math.max(0, total - played)
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
@@ -44,6 +47,7 @@ function CountdownPreview({ layer, fontPx }: { layer: SceneLayer; fontPx: number
     <span style={{ fontSize: fontPx }}>
       {mm}:{ss}
       {layer.countdown_background && <span title="Continue en arrière-plan"> ⟳</span>}
+      {layer.countdown_paused && <span title="En pause"> ⏸</span>}
     </span>
   )
 }
@@ -53,6 +57,9 @@ type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 const GRID = 10
 const MIN_SIZE = 8
+// A layer may be stretched well beyond the frame (the editor shows it cropped on
+// air). This caps the size so a stray drag cannot create an absurdly large box.
+const MAX_SCALE = 8
 const MIN_FONT = 8
 const SNAP = 6 // scene units within which a guide snaps
 
@@ -137,9 +144,10 @@ export default function SceneCanvas({
     y: Math.round(l.y),
   })
 
-  // Bound a resized box: never smaller than MIN_SIZE and never larger than the
-  // frame. The position is left free, so a box may be dragged or resized partly
-  // outside the frame; the edge being dragged stays where the user puts it.
+  // Bound a resized box: never smaller than MIN_SIZE, but it may grow well
+  // beyond the frame (the operator can stretch an element past the edges). The
+  // position is left free too, so a box may sit partly (or fully) outside the
+  // frame; the edge being dragged stays where the user puts it.
   const clampResize = (
     x: number,
     y: number,
@@ -147,8 +155,10 @@ export default function SceneCanvas({
     h: number,
     _hnd: Handle,
   ): { x: number; y: number; width: number; height: number } => {
-    w = Math.max(MIN_SIZE, Math.min(w, width))
-    h = Math.max(MIN_SIZE, Math.min(h, height))
+    const maxW = Math.max(width * MAX_SCALE, MIN_SIZE)
+    const maxH = Math.max(height * MAX_SCALE, MIN_SIZE)
+    w = Math.max(MIN_SIZE, Math.min(w, maxW))
+    h = Math.max(MIN_SIZE, Math.min(h, maxH))
     return { x, y, width: w, height: h }
   }
 
@@ -387,9 +397,13 @@ export default function SceneCanvas({
           // Layers are static by default (opening a scene must not spam every
           // animation). Hovering a layer — selected or not — plays its animation
           // once, so the operator can preview the motion they just chose.
+          // The "audio-reactive" loop is the exception: it depends on the live
+          // music, so the editor never plays it as a demo (it would only show a
+          // meaningless scale pulse).
           const isSelected = selected === i
           const isHovered = hovered === i || previewIndex === i
-          const anim = isHovered && !dragging ? layerAnimation(l, 0, width * scale, false, true) : null
+          const canDemo = l.anim_loop !== 'audio_reactive'
+          const anim = isHovered && !dragging && canDemo ? layerAnimation(l, 0, width * scale, false, true) : null
           const showAnim = Boolean(anim)
           // Remount the layer while it is hovered so the one-shot animation
           // starts from the beginning on every hover (a CSS animation does not

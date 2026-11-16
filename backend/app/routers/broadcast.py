@@ -337,10 +337,25 @@ class CountdownPayload(BaseModel):
     # (persisted on the scene, so the on-air countdown is longer too), "restart"
     # starts the countdown over by restarting the current item, "start" records a
     # wall-clock start (so a background countdown keeps running), "background"
-    # toggles the "continue in background" flag.
+    # toggles the "continue in background" flag, "pause"/"resume" freeze and
+    # restart the timer.
     action: str = "add"
     seconds: int = Field(default=0, ge=0, le=86400)
     enabled: bool = False
+
+
+def _countdown_elapsed(layer: dict[str, Any]) -> int:
+    """Seconds the countdown has already run (accumulated + current run)."""
+    base = int(layer.get("countdown_elapsed") or 0)
+    if layer.get("countdown_paused"):
+        return base
+    start = layer.get("countdown_start")
+    if start:
+        try:
+            return base + max(0, int(time.time() - float(start)))
+        except (TypeError, ValueError):
+            return base
+    return base
 
 
 def _find_countdown(item_id: int) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -376,11 +391,15 @@ def countdown(payload: CountdownPayload, user: dict = Depends(require(permission
         raise HTTPException(status_code=404, detail="Aucun compte à rebours sur cet élément")
 
     if payload.action == "start":
-        # (Re)start the countdown: record the wall-clock start on the scene so a
-        # "continue in background" countdown keeps running even off air, and
-        # restart the item when it is the one on air so the timer visibly resets.
+        # (Re)start the countdown: clear any accumulated time and record the
+        # wall-clock start on the scene so a "continue in background" countdown
+        # keeps running even off air; restart the item when it is on air so the
+        # timer visibly resets.
         layers = scene["layers"]
-        layers[found["index"]]["countdown_start"] = time.time()
+        layer = layers[found["index"]]
+        layer["countdown_elapsed"] = 0
+        layer["countdown_paused"] = False
+        layer["countdown_start"] = time.time()
         db.execute(
             "UPDATE scenes SET layers=?, updated_at=datetime('now') WHERE id=?",
             (json.dumps(layers), scene["id"]),
@@ -395,8 +414,41 @@ def countdown(payload: CountdownPayload, user: dict = Depends(require(permission
             "ok": True,
             "started": True,
             "restarted": restarted,
-            "seconds": int(found["layer"].get("countdown_seconds") or 60),
+            "seconds": int(layer.get("countdown_seconds") or 60),
         }
+
+    if payload.action == "pause":
+        # Freeze the countdown: accumulate the elapsed time so it resumes from
+        # where it stopped (and stops advancing on air and in the background).
+        layers = scene["layers"]
+        layer = layers[found["index"]]
+        layer["countdown_elapsed"] = _countdown_elapsed(layer)
+        layer["countdown_paused"] = True
+        db.execute(
+            "UPDATE scenes SET layers=?, updated_at=datetime('now') WHERE id=?",
+            (json.dumps(layers), scene["id"]),
+        )
+        engine = get_engine()
+        st = engine.status()
+        if st.get("running") and (st.get("current") or {}).get("id") == payload.item_id:
+            engine.restart_current()
+        return {"ok": True, "paused": True, "elapsed": int(layer["countdown_elapsed"])}
+
+    if payload.action == "resume":
+        # Resume a frozen countdown from where it stopped.
+        layers = scene["layers"]
+        layer = layers[found["index"]]
+        layer["countdown_paused"] = False
+        layer["countdown_start"] = time.time()
+        db.execute(
+            "UPDATE scenes SET layers=?, updated_at=datetime('now') WHERE id=?",
+            (json.dumps(layers), scene["id"]),
+        )
+        engine = get_engine()
+        st = engine.status()
+        if st.get("running") and (st.get("current") or {}).get("id") == payload.item_id:
+            engine.restart_current()
+        return {"ok": True, "paused": False}
 
     if payload.action == "restart":
         engine = get_engine()

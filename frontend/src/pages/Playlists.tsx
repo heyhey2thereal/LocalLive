@@ -183,6 +183,8 @@ export default function Playlists() {
           patch.background_audio_continue !== undefined
             ? patch.background_audio_continue
             : settingsItem.background_audio_continue,
+        fade_in: patch.fade_in ?? settingsItem.fade_in,
+        fade_out: patch.fade_out ?? settingsItem.fade_out,
       })
       setSettingsItem(null)
       await load()
@@ -579,6 +581,8 @@ function ItemSettingsModal({
   const [audioId, setAudioId] = useState<number | ''>(item.background_audio_id ?? '')
   const [volume, setVolume] = useState(item.background_volume ?? 0.15)
   const [continueMusic, setContinueMusic] = useState(Boolean(item.background_audio_continue))
+  const [fadeIn, setFadeIn] = useState(item.fade_in ?? 0)
+  const [fadeOut, setFadeOut] = useState(item.fade_out ?? 0)
 
   return (
     <Modal
@@ -598,6 +602,8 @@ function ItemSettingsModal({
                 background_audio_id: audioId === '' ? null : Number(audioId),
                 background_volume: volume,
                 background_audio_continue: continueMusic,
+                fade_in: fadeIn,
+                fade_out: fadeOut,
               })
             }
           >
@@ -674,6 +680,37 @@ function ItemSettingsModal({
           onChange={(e) => setVolume(Number(e.target.value))}
         />
       </div>
+
+      <div className="grid grid-2">
+        <div className="field">
+          <label>Fondu d'entrée (s)</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            max={60}
+            step={0.5}
+            value={fadeIn}
+            onChange={(e) => setFadeIn(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+        <div className="field">
+          <label>Fondu de sortie (s)</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            max={60}
+            step={0.5}
+            value={fadeOut}
+            onChange={(e) => setFadeOut(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+      </div>
+      <span className="hint">
+        Le son de l'élément monte en douceur au début et redescend à la fin (0 = pas de fondu).
+        S'applique à l'antenne (musique de fond et son de la vidéo).
+      </span>
     </Modal>
   )
 }

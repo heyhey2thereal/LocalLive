@@ -42,6 +42,9 @@ class ItemPayload(BaseModel):
     background_volume: float | None = Field(default=None, ge=0, le=2)
     # Keep playing the previous item's background music instead of starting one.
     background_audio_continue: bool | None = None
+    # Fade in / fade out of the item's audio (seconds); 0 disables it.
+    fade_in: float | None = Field(default=None, ge=0, le=60)
+    fade_out: float | None = Field(default=None, ge=0, le=60)
 
     @field_validator("transition")
     @classmethod
@@ -68,6 +71,7 @@ def _load_items(playlist_id: int) -> list[dict[str, Any]]:
         """SELECT pi.id, pi.media_id, pi.scene_id, pi.position, pi.duration,
                   pi.transition, pi.transition_duration, pi.background_audio_id,
                   pi.background_volume, pi.background_audio_continue,
+                  pi.fade_in, pi.fade_out,
                   m.title AS media_title, m.kind AS media_kind, m.duration AS media_duration,
                   m.thumbnail AS thumbnail, m.path AS media_path,
                   bg.title AS background_audio_title,
@@ -99,6 +103,8 @@ def _load_items(playlist_id: int) -> list[dict[str, Any]]:
         raw_volume = d.get("background_volume")
         d["background_volume"] = 0.15 if raw_volume is None else float(raw_volume)
         d["background_audio_continue"] = bool(d.get("background_audio_continue"))
+        d["fade_in"] = float(d.get("fade_in") or 0)
+        d["fade_out"] = float(d.get("fade_out") or 0)
         if d["thumbnail"]:
             d["thumbnail_url"] = f"/api/media/{d['media_id']}/thumbnail"
         else:
@@ -173,13 +179,14 @@ def duplicate_playlist(
         db.execute(
             """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
                                           transition, transition_duration, background_audio_id, background_volume,
-                                          background_audio_continue)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                                          background_audio_continue, fade_in, fade_out)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 new_id, item["media_id"], item["scene_id"], item["position"], item["duration"],
                 item["transition"], item["transition_duration"],
                 item["background_audio_id"], item["background_volume"],
                 int(item["background_audio_continue"] or 0),
+                float(item["fade_in"] or 0), float(item["fade_out"] or 0),
             ),
         )
     return _playlist_dict(db.query_one("SELECT * FROM playlists WHERE id = ?", (new_id,)))
@@ -243,13 +250,14 @@ def add_item(
     db.execute(
         """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
                                       transition, transition_duration, background_audio_id, background_volume,
-                                      background_audio_continue)
-           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                                      background_audio_continue, fade_in, fade_out)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             playlist_id, payload.media_id, payload.scene_id, row["pos"], payload.duration or 0,
             payload.transition or "cut", payload.transition_duration or 0,
             payload.background_audio_id, payload.background_volume if payload.background_volume is not None else 0.15,
             1 if payload.background_audio_continue else 0,
+            payload.fade_in or 0, payload.fade_out or 0,
         ),
     )
     _reload_if_live(playlist_id)
@@ -292,6 +300,12 @@ def update_item(
     if payload.background_audio_continue is not None:
         fields.append("background_audio_continue = ?")
         values.append(1 if payload.background_audio_continue else 0)
+    if payload.fade_in is not None:
+        fields.append("fade_in = ?")
+        values.append(payload.fade_in)
+    if payload.fade_out is not None:
+        fields.append("fade_out = ?")
+        values.append(payload.fade_out)
     if fields:
         values.append(item_id)
         db.execute(f"UPDATE playlist_items SET {', '.join(fields)} WHERE id = ?", tuple(values))
@@ -326,13 +340,14 @@ def duplicate_item(
         conn.execute(
             """INSERT INTO playlist_items(playlist_id, media_id, scene_id, position, duration,
                                           transition, transition_duration, background_audio_id, background_volume,
-                                          background_audio_continue)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                                          background_audio_continue, fade_in, fade_out)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 playlist_id, row["media_id"], row["scene_id"], row["position"] + 1, row["duration"],
                 row["transition"], row["transition_duration"],
                 row["background_audio_id"], row["background_volume"],
                 int(row["background_audio_continue"] or 0),
+                float(row["fade_in"] or 0), float(row["fade_out"] or 0),
             ),
         )
     _reload_if_live(playlist_id)

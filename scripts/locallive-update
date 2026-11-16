@@ -21,6 +21,8 @@ DATA_DIR="${DATA_DIR:-/var/lib/locallive}"
 CONF_DIR="${CONF_DIR:-/etc/locallive}"
 SRC_DIR="${SRC_DIR:-${DATA_DIR}/update-src}"
 VENV_DIR="${VENV_DIR:-${APP_DIR}/venv}"
+LOG_DIR="${LOG_DIR:-${DATA_DIR}/logs}"
+LOG_FILE="${LOG_FILE:-${LOG_DIR}/update.log}"
 
 # Read LOCALLIVE_UPDATE_REPO / LOCALLIVE_UPDATE_BRANCH from the env file if set.
 if [[ -f "${CONF_DIR}/locallive.env" ]]; then
@@ -51,43 +53,63 @@ if [[ "${LOCALLIVE_UPDATE_DETACHED:-0}" != "1" ]] && command -v systemd-run >/de
   echo "! systemd-run indisponible, mise à jour en direct" >&2
 fi
 
-if [[ -z "${REPO}" ]]; then
-  echo "Aucun dépôt de mise à jour configuré (LOCALLIVE_UPDATE_REPO)." >&2
-  exit 3
-fi
+# From here on we run the actual update. Everything is mirrored to the console
+# log so the interface can show it (Settings → Mise à jour).
+prepare_log() {
+  mkdir -p "${LOG_DIR}" 2>/dev/null || true
+  # A fresh log per run, world-readable so the service can display it.
+  : >"${LOG_FILE}" 2>/dev/null || true
+  chmod 0644 "${LOG_FILE}" 2>/dev/null || true
+}
 
-echo "==> Mise à jour depuis ${REPO} (branche ${BRANCH})"
-command -v git >/dev/null 2>&1 || { echo "git est requis." >&2; exit 4; }
-
-if [[ -d "${SRC_DIR}/.git" ]]; then
-  git -C "${SRC_DIR}" fetch --depth 1 origin "${BRANCH}" || exit 5
-  git -C "${SRC_DIR}" reset --hard FETCH_HEAD || exit 5
-else
-  rm -rf "${SRC_DIR}"
-  git clone --depth 1 --branch "${BRANCH}" "${REPO}" "${SRC_DIR}" || exit 5
-fi
-
-if [[ ! -x "${SRC_DIR}/update.sh" ]]; then
-  echo "update.sh introuvable dans le dépôt." >&2
-  exit 6
-fi
-
-echo "==> Application de la mise à jour"
-# update.sh performs the backup, code copy, dependency install, frontend build
-# and service restart, and verifies the service came back up.
-APP_DIR="${APP_DIR}" DATA_DIR="${DATA_DIR}" CONF_DIR="${CONF_DIR}" \
-  bash "${SRC_DIR}/update.sh"
-STATUS=$?
-
-# Record the "updated to X" notice for the interface (shown once, next open).
-# Read the freshly written VERSION, not the version we left.
-if [[ "${STATUS}" -eq 0 && -f "${APP_DIR}/VERSION" ]]; then
-  VERSION_VALUE="$(head -n1 "${APP_DIR}/VERSION" | tr -d '[:space:]')"
-  if [[ -n "${VERSION_VALUE}" && -x "${VENV_DIR}/bin/python" ]]; then
-    LOCALLIVE_DATA="${DATA_DIR}" "${VENV_DIR}/bin/python" -c \
-      "import sys; sys.path.insert(0, '${APP_DIR}/backend'); from app import db; db.set_setting('pending_update_notice', '${VERSION_VALUE}')" \
-      2>/dev/null || true
+run_update() {
+  echo "===== LocalLive — mise à jour $(date '+%Y-%m-%d %H:%M:%S') ====="
+  if [[ -z "${REPO}" ]]; then
+    echo "Aucun dépôt de mise à jour configuré (LOCALLIVE_UPDATE_REPO)." >&2
+    return 3
   fi
-fi
 
-exit "${STATUS}"
+  echo "==> Mise à jour depuis ${REPO} (branche ${BRANCH})"
+  command -v git >/dev/null 2>&1 || { echo "git est requis." >&2; return 4; }
+
+  if [[ -d "${SRC_DIR}/.git" ]]; then
+    git -C "${SRC_DIR}" fetch --depth 1 origin "${BRANCH}" || return 5
+    git -C "${SRC_DIR}" reset --hard FETCH_HEAD || return 5
+  else
+    rm -rf "${SRC_DIR}"
+    git clone --depth 1 --branch "${BRANCH}" "${REPO}" "${SRC_DIR}" || return 5
+  fi
+
+  if [[ ! -x "${SRC_DIR}/update.sh" ]]; then
+    echo "update.sh introuvable dans le dépôt." >&2
+    return 6
+  fi
+
+  echo "==> Application de la mise à jour"
+  # update.sh performs the backup, code copy, dependency install, frontend build
+  # and service restart, and verifies the service came back up.
+  APP_DIR="${APP_DIR}" DATA_DIR="${DATA_DIR}" CONF_DIR="${CONF_DIR}" \
+    bash "${SRC_DIR}/update.sh"
+  local status=$?
+
+  # Record the "updated to X" notice for the interface (shown once, next open).
+  # Read the freshly written VERSION, not the version we left.
+  if [[ "${status}" -eq 0 && -f "${APP_DIR}/VERSION" ]]; then
+    VERSION_VALUE="$(head -n1 "${APP_DIR}/VERSION" | tr -d '[:space:]')"
+    if [[ -n "${VERSION_VALUE}" && -x "${VENV_DIR}/bin/python" ]]; then
+      LOCALLIVE_DATA="${DATA_DIR}" "${VENV_DIR}/bin/python" -c \
+        "import sys; sys.path.insert(0, '${APP_DIR}/backend'); from app import db; db.set_setting('pending_update_notice', '${VERSION_VALUE}')" \
+        2>/dev/null || true
+    fi
+    echo "==> Terminé : version ${VERSION_VALUE}"
+  else
+    echo "==> Échec de la mise à jour (code ${status})." >&2
+  fi
+  return "${status}"
+}
+
+prepare_log
+# Mirror stdout+stderr to the console and to the log file. `pipefail` keeps the
+# real exit status even though the output goes through `tee`.
+run_update 2>&1 | tee -a "${LOG_FILE}"
+exit "${PIPESTATUS[0]}"

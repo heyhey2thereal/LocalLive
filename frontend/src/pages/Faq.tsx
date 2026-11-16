@@ -105,6 +105,26 @@ const SECTIONS: Section[] = [
         a: "Ouvrez les réglages d'un élément et choisissez une « Transition d'entrée » (fondu, balayage, cercle…). Elle s'applique à la jonction avec l'élément précédent.",
       },
       {
+        q: 'Comment ajouter un fondu d’entrée ou de sortie à un élément ?',
+        a: "Dans les réglages d'un élément (bouton transition/musique), réglez « Fondu d'entrée » et « Fondu de sortie » en secondes. Le son de l'élément monte en douceur au début et redescend à la fin (0 = pas de fondu).",
+      },
+      {
+        q: 'Comment régler le volume de ce que j’entends ?',
+        a: "En bas de la page Aperçu / Programme, la console de son a un curseur de volume (🔊). Il règle uniquement ce que vous entendez sur le moniteur — le niveau diffusé à l'antenne n'est pas modifié.",
+      },
+      {
+        q: 'La musique de l’aperçu suit-elle la playlist ?',
+        a: "Oui. La console de son suit l'élément affiché dans l'aperçu : elle avance avec la musique et change de piste quand l'aperçu passe à l'élément suivant. C'est le contrôle de la musique courante : mettre en pause met aussi le direct en pause, et la barre permet de reculer/avancer.",
+      },
+      {
+        q: 'Comment mettre un compte à rebours en pause ?',
+        a: "Sous le moniteur, le bouton « ⏸ Pause / ▶ Reprendre » fige le décompte et le reprend là où il s'était arrêté. Dans l'éditeur de scène, la case « En pause » fait la même chose.",
+      },
+      {
+        q: 'Puis-je étirer une image plus grande que le cadre ?',
+        a: "Oui. En étirant une poignée, un calque image/logo/vidéo peut dépasser le cadre : il est alors découpé (croppé) à l'antenne, exactement comme les autres éléments hors cadre.",
+      },
+      {
         q: 'Mes modifications de playlist sont-elles prises en compte en direct ?',
         a: "Oui. Si la playlist modifiée est celle qui est à l'antenne, le moteur la recharge aussitôt et reprend au même élément. Les autres playlists (et l'aperçu) ne sont pas touchés.",
       },
@@ -169,6 +189,10 @@ const SECTIONS: Section[] = [
       {
         q: 'Le bouton « Mettre à jour » demande une configuration manuelle, pourquoi ?',
         a: "Cela arrivait quand le service ne pouvait pas exécuter l'outil de mise à jour (droits sudo bloqués, outil obsolète, ou paquet sudo absent). Les versions 2.15.1+ corrigent ces points : relancez install.sh sur le serveur (ou une mise à jour manuelle) pour les appliquer une dernière fois.",
+      },
+      {
+        q: 'Où voir le déroulé de la mise à jour ?',
+        a: "Dans la fenêtre « Mise à jour », une console affiche en direct tout ce que fait la mise à jour (git, copie du code, pip, compilation de l'interface, redémarrage). En cas d'échec, elle reste ouverte avec le détail pour diagnostiquer.",
       },
       {
         q: 'Comment sauvegarder ma configuration ?',

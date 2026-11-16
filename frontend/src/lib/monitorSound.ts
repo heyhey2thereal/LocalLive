@@ -32,6 +32,8 @@ export interface MonitorSoundState {
   audible: boolean
   /** URL currently loaded (null when nothing is loaded). */
   url: string | null
+  /** Operator-controlled output volume (0..1). */
+  volume: number
 }
 
 type Listener = (state: MonitorSoundState) => void
@@ -44,6 +46,9 @@ let currentSource: MonitorSource | null = null
 let enabled = false
 let visibleClaims = 0
 let lastVolume = 1
+// Operator-controlled output volume (the volume slider), applied on top of the
+// per-item volume so the monitor can be turned down without changing the mix.
+let userVolume = 1
 const listeners = new Set<Listener>()
 
 function shouldBeAudible(): boolean {
@@ -57,6 +62,7 @@ function state(): MonitorSoundState {
     playing: Boolean(element && currentUrl && !element.paused && !element.ended),
     audible: shouldBeAudible(),
     url: currentUrl,
+    volume: userVolume,
   }
 }
 
@@ -109,7 +115,7 @@ function ensureElement(): HTMLAudioElement {
 
 function applyGain(): void {
   if (!element) return
-  const value = shouldBeAudible() ? Math.min(Math.max(lastVolume, 0), 1) : 0
+  const value = shouldBeAudible() ? Math.min(Math.max(lastVolume * userVolume, 0), 1) : 0
   if (gain) {
     gain.gain.value = value
   } else {
@@ -216,6 +222,21 @@ export function unmuteMonitorSound(): void {
   if (element) void element.play().catch(() => {})
   applyGain()
   emit()
+}
+
+/**
+ * Set the monitor output volume (0..1). Applied on top of the per-item volume,
+ * so it never changes the on-air mix — only what the operator hears.
+ */
+export function setMonitorVolume(value: number): void {
+  userVolume = Math.min(Math.max(value, 0), 1)
+  applyGain()
+  emit()
+}
+
+/** The current monitor output volume (0..1). */
+export function getMonitorVolume(): number {
+  return userVolume
 }
 
 /**

@@ -4,10 +4,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 import shlex
 import subprocess
+from pathlib import Path
 
 from .. import __version__, config, db, monitor, permissions, versioning
 from ..deps import current_user, require
@@ -54,6 +55,23 @@ def _installed_version() -> str | None:
         except OSError:
             continue
     return None
+
+
+def _update_log_path() -> Path:
+    """Path of the update console log (written by the self-update helper)."""
+    return config.LOGS_DIR / "update.log"
+
+
+def _read_update_log(lines: int = 200) -> list[str]:
+    """Tail of the update log, or [] when it does not exist yet."""
+    path = _update_log_path()
+    try:
+        if not path.exists():
+            return []
+        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return content[-max(1, min(lines, 1000)):]
+    except OSError:
+        return []
 
 
 def _github_get(url: str) -> Any:
@@ -157,11 +175,29 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
             "manual": True,
             "hint": "Programme de mise à jour introuvable. Relancez install.sh sur le serveur.",
         }
+    # Parsing the command must never crash the request: a stray quote in the
+    # configured command used to raise and surface as a 500.
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return {
+            "ok": False,
+            "manual": True,
+            "hint": "La commande de mise à jour est mal formée (guillemets). "
+                    "Corrigez-la ou relancez install.sh sur le serveur.",
+        }
+    if not argv:
+        return {
+            "ok": False,
+            "manual": True,
+            "hint": "Commande de mise à jour vide. Relancez install.sh sur le serveur.",
+        }
     try:
         proc = subprocess.run(
-            shlex.split(command),
+            argv,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=600,
             stdin=subprocess.DEVNULL,
         )
@@ -173,19 +209,26 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
             "manual": True,
             "hint": "Commande de mise à jour introuvable. Relancez install.sh sur le serveur.",
         }
+    except (PermissionError, OSError) as exc:
+        return {
+            "ok": False,
+            "manual": True,
+            "hint": f"Impossible d'exécuter la mise à jour ({exc}). "
+                    "Relancez install.sh sur le serveur.",
+        }
     output = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode == 0:
         # Detached run: the real update is still in progress; the helper writes
         # the "updated to X" notice itself when it succeeds.
         if "LOCALLIVE_UPDATE_DETACHED_OK" in output:
-            return {"ok": True, "detached": True, "output": output[-2000:]}
+            return {"ok": True, "detached": True, "output": output[-4000:]}
         # Synchronous run: remember the version that was just applied so the UI
         # can show a short "updated" notice exactly once, next time someone opens
         # the app. `__version__` is the *running* (old) version, so read the
         # freshly written VERSION file instead.
         applied = _installed_version() or __version__
         db.set_setting("pending_update_notice", applied)
-        return {"ok": True, "output": output[-2000:]}
+        return {"ok": True, "output": output[-4000:]}
     # A non-zero exit may simply mean the helper could not detach (no systemd):
     # in that case it reports a manual hint instead of a raw error.
     if "sudo" in command and ("password" in output.lower() or "sudo:" in output.lower()):
@@ -195,7 +238,20 @@ def update(user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str,
             "hint": "Le service ne peut pas exécuter la mise à jour automatiquement. "
                     "Relancez install.sh (règle sudoers) ou lancez update.sh sur le serveur.",
         }
-    return {"ok": False, "error": (output or "Échec de la mise à jour")[-2000:]}
+    return {"ok": False, "error": (output or "Échec de la mise à jour")[-4000:]}
+
+
+@router.get("/update/log")
+def update_log(lines: int = 200, user: dict = Depends(require(permissions.CAP_SETTINGS))) -> dict[str, Any]:
+    """Console output of the last update, for the settings popup.
+
+    The self-update helper writes everything it does to
+    `LOGS_DIR/update.log`, so the operator can watch the update (git pull, code
+    copy, pip, npm build, service restart) from the interface.
+    """
+    lines = max(1, min(lines, 1000))
+    return {"path": str(_update_log_path()), "lines": _read_update_log(lines)}
+
 
 
 @router.get("/update-notice")

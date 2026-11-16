@@ -46,9 +46,11 @@ export default function Settings() {
 
   // Update flow
   const [updateOpen, setUpdateOpen] = useState(false)
-  const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'updating' | 'done'>('idle')
+  const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'updating' | 'done' | 'error'>('idle')
   const [updateMsg, setUpdateMsg] = useState('')
+  const [updateConsole, setUpdateConsole] = useState<string[]>([])
   const [updateCheck, setUpdateCheck] = useState<{ current: string; latest: string | null; update_available: boolean; repo: string; branch: string } | null>(null)
+  const updateLogTimer = useRef<number | null>(null)
   const [configBusy, setConfigBusy] = useState(false)
   const configInput = useRef<HTMLInputElement>(null)
 
@@ -187,12 +189,37 @@ export default function Settings() {
     }
   }
 
+  // Poll the update console log while an update runs, so the operator can watch
+  // every step (git pull, code copy, pip, npm build, service restart).
+  const startUpdateLogPolling = useCallback(() => {
+    const fetchLog = async () => {
+      try {
+        const data = await api.get<{ lines: string[] }>('/api/system/update/log?lines=400')
+        setUpdateConsole(data.lines ?? [])
+      } catch {
+        /* the service is restarting; keep the last lines we have */
+      }
+    }
+    void fetchLog()
+    if (updateLogTimer.current) window.clearInterval(updateLogTimer.current)
+    updateLogTimer.current = window.setInterval(fetchLog, 2000)
+  }, [])
+
+  const stopUpdateLogPolling = useCallback(() => {
+    if (updateLogTimer.current) {
+      window.clearInterval(updateLogTimer.current)
+      updateLogTimer.current = null
+    }
+  }, [])
+
+  useEffect(() => () => stopUpdateLogPolling(), [stopUpdateLogPolling])
+
   // Wait for the service to come back after a background update, then reload.
   // The update restarts the service, so its API is briefly unavailable. We only
   // reload once the service has actually gone down and come back (or its version
   // changed), otherwise we would reload while the *old* instance is still up.
   const waitForRestart = async (previousVersion: string | undefined) => {
-    const deadline = Date.now() + 10 * 60 * 1000 // 10 minutes max (npm build can be slow)
+    const deadline = Date.now() + 15 * 60 * 1000 // 15 minutes max (npm build can be slow)
     let sawDown = false
     // Give the updater a moment to start stopping the service before probing.
     await new Promise((r) => setTimeout(r, 3000))
@@ -202,10 +229,14 @@ export default function Settings() {
         if (health?.status === 'ok') {
           const versionChanged = previousVersion && health.version !== previousVersion
           if (sawDown || versionChanged) {
+            stopUpdateLogPolling()
+            setUpdateState('done')
             setUpdateMsg(
-              versionChanged ? `Mise à jour vers la version ${health.version} terminée. Rechargement…` : 'Service redémarré. Rechargement…',
+              versionChanged
+                ? `Mise à jour vers la version ${health.version} terminée. Rechargement…`
+                : 'Service redémarré. Rechargement…',
             )
-            await new Promise((r) => setTimeout(r, 1200))
+            await new Promise((r) => setTimeout(r, 1500))
             window.location.reload()
             return
           }
@@ -216,6 +247,7 @@ export default function Settings() {
       }
       await new Promise((r) => setTimeout(r, 3000))
     }
+    stopUpdateLogPolling()
     setUpdateState('done')
     setUpdateMsg('Mise à jour lancée. Rechargez la page dans quelques instants.')
   }
@@ -223,6 +255,7 @@ export default function Settings() {
   const runUpdate = async () => {
     setUpdateState('checking')
     setUpdateMsg('Vérification…')
+    setUpdateConsole([])
     // Ask the backend to run the configured update command. The service usually
     // runs unprivileged and cannot update itself, so when no command is set (or
     // it fails) we show the exact shell commands to run on the host.
@@ -234,6 +267,7 @@ export default function Settings() {
         detached?: boolean
         hint?: string
         error?: string
+        output?: string
       }>('/api/system/update', {})
       if (res.ok) {
         setUpdateState('updating')
@@ -241,24 +275,30 @@ export default function Settings() {
         if (res.detached) {
           // The helper runs in the background (it stops/restarts the service).
           setUpdateMsg('Mise à jour en cours… Le service va redémarrer.')
+          startUpdateLogPolling()
           await waitForRestart(previousVersion)
           return
         }
+        // Synchronous success (rare): show its output, then reload.
+        if (res.output) setUpdateConsole(res.output.split('\n'))
+        stopUpdateLogPolling()
         await new Promise((r) => setTimeout(r, 1500))
         window.location.reload()
         return
       }
-      setUpdateState('idle')
-      setUpdateOpen(false)
-      push({
-        kind: 'info',
-        title: res.manual ? 'Mise à jour manuelle requise' : 'Mise à jour impossible',
-        message: res.hint ?? res.error ?? 'Lancez update.sh sur le serveur.',
-      })
+      // Failure: keep the modal open and show the console output (or the hint).
+      stopUpdateLogPolling()
+      if (res.error) setUpdateConsole(res.error.split('\n'))
+      setUpdateState('error')
+      setUpdateMsg(
+        res.manual
+          ? res.hint ?? 'Mise à jour manuelle requise. Lancez update.sh sur le serveur.'
+          : res.hint ?? 'La mise à jour a échoué. Consultez la console ci-dessous.',
+      )
     } catch (err: any) {
-      setUpdateState('idle')
-      setUpdateOpen(false)
-      push({ kind: 'err', title: 'Mise à jour impossible', message: err?.message })
+      stopUpdateLogPolling()
+      setUpdateState('error')
+      setUpdateMsg(err?.message ?? 'Mise à jour impossible')
     }
   }
 
@@ -338,7 +378,7 @@ export default function Settings() {
               </button>
               <button
                 className={`btn ${updateCheck?.update_available ? 'btn-primary' : ''}`}
-                onClick={() => { setUpdateOpen(true); setUpdateState('idle') }}
+                onClick={() => { setUpdateOpen(true); setUpdateState('idle'); setUpdateConsole([]) }}
               >
                 <IconZap size={15} /> Mettre à jour
               </button>
@@ -501,7 +541,12 @@ export default function Settings() {
       {updateOpen && (
         <Modal
           title="Mise à jour de LocalLive"
-          onClose={() => updateState !== 'updating' && updateState !== 'checking' && setUpdateOpen(false)}
+          wide
+          onClose={() => {
+            if (updateState === 'updating' || updateState === 'checking') return
+            stopUpdateLogPolling()
+            setUpdateOpen(false)
+          }}
           footer={
             updateState === 'idle' ? (
               <>
@@ -510,6 +555,21 @@ export default function Settings() {
                 </button>
                 <button className="btn btn-primary" onClick={runUpdate}>
                   <IconZap size={15} /> Lancer la mise à jour
+                </button>
+              </>
+            ) : updateState === 'error' ? (
+              <>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    stopUpdateLogPolling()
+                    setUpdateOpen(false)
+                  }}
+                >
+                  Fermer
+                </button>
+                <button className="btn btn-primary" onClick={runUpdate}>
+                  <IconZap size={15} /> Réessayer
                 </button>
               </>
             ) : undefined
@@ -522,13 +582,49 @@ export default function Settings() {
             </p>
           ) : (
             <div className="update-progress">
-              <div className="update-spinner">
-                <Spinner large />
-              </div>
+              {updateState !== 'error' && (
+                <div className="update-spinner">
+                  <Spinner large />
+                </div>
+              )}
               <div>{updateMsg}</div>
               <div className="update-bar">
-                <span style={{ width: updateState === 'checking' ? '33%' : updateState === 'updating' ? '75%' : '100%' }} />
+                <span
+                  style={{
+                    width:
+                      updateState === 'checking'
+                        ? '20%'
+                        : updateState === 'updating'
+                          ? '75%'
+                          : '100%',
+                    background: updateState === 'error' ? 'var(--red)' : undefined,
+                  }}
+                />
               </div>
+            </div>
+          )}
+          {/* Console output of the update (git pull, code copy, pip, npm build,
+              service restart). Kept visible while running and on failure. */}
+          {updateState !== 'idle' && (
+            <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+              <label>Console de mise à jour</label>
+              <pre
+                className="mono update-console"
+                style={{
+                  maxHeight: 320,
+                  overflow: 'auto',
+                  margin: 0,
+                  padding: '10px 12px',
+                  background: 'var(--bg-3)',
+                  border: '1px solid var(--line-soft)',
+                  borderRadius: 8,
+                  color: 'var(--text-2)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {updateConsole.length > 0 ? updateConsole.join('\n') : 'En attente de la sortie de la mise à jour…'}
+              </pre>
             </div>
           )}
         </Modal>

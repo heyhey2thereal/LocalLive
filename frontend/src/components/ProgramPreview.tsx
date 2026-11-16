@@ -48,6 +48,8 @@ function Countdown({
   startedAt = null,
   background = false,
   backgroundStart = null,
+  paused = false,
+  base = 0,
 }: {
   total: number
   mode: string
@@ -57,23 +59,30 @@ function Countdown({
   /** "Continue in background": count on wall-clock time from `backgroundStart`. */
   background?: boolean
   backgroundStart?: number | null
+  /** Frozen: the timer stops advancing. */
+  paused?: boolean
+  /** Seconds already run before the last start (used when paused). */
+  base?: number
 }) {
   const [now, setNow] = useState(0)
+  const ticking = !paused && (elapsed !== null || startedAt !== null || (background && backgroundStart))
   useEffect(() => {
-    if (elapsed !== null || (startedAt === null && !(background && backgroundStart))) return
+    if (!ticking) return
     const t = window.setInterval(() => setNow((v) => v + 1), 250)
     return () => window.clearInterval(t)
-  }, [total, mode, elapsed, startedAt, background, backgroundStart])
+  }, [ticking, total, mode, elapsed, startedAt, background, backgroundStart])
   // On air: engine elapsed + a local sub-tick. Preview (started): local elapsed.
   // Background: wall-clock elapsed since the saved start (keeps running off air).
-  // Otherwise: frozen on the starting value.
-  let played = 0
-  if (elapsed !== null) {
-    played = elapsed + now
+  // Paused: frozen at the accumulated base. Otherwise: the starting value.
+  let played = base
+  if (paused) {
+    played = base
+  } else if (elapsed !== null) {
+    played = base + elapsed + now
   } else if (background && backgroundStart) {
-    played = Math.max(0, Math.floor(Date.now() / 1000 - backgroundStart))
+    played = base + Math.max(0, Math.floor(Date.now() / 1000 - backgroundStart))
   } else if (startedAt !== null) {
-    played = Math.floor((Date.now() - startedAt) / 1000)
+    played = base + Math.floor((Date.now() - startedAt) / 1000)
   }
   const secs = mode === 'up' ? total + played : Math.max(0, total - played)
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
@@ -82,6 +91,7 @@ function Countdown({
     <span style={{ fontSize: fontPx }}>
       {mm}:{ss}
       {background && <span title="Continue en arrière-plan"> ⟳</span>}
+      {paused && <span title="En pause"> ⏸</span>}
     </span>
   )
 }
@@ -163,6 +173,7 @@ function layerBadge(l: SceneLayer): string | null {
 function ReactiveVisualizer({ layer, width, height }: { layer: SceneLayer; width: number; height: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const kind = layer.visualizer ?? 'spectrum'
+  const gain = Math.min(Math.max(layer.audio_sensitivity ?? 1, 0.1), 5)
   useEffect(() => {
     let raf = 0
     const draw = () => {
@@ -180,10 +191,11 @@ function ReactiveVisualizer({ layer, width, height }: { layer: SceneLayer; width
       const step = Math.max(1, Math.floor(bins.length / n))
       const bw = width / n
       for (let i = 0; i < n; i++) {
-        // Average a small band of bins so the bars are stable.
+        // Average a small band of bins so the bars are stable, then apply the
+        // sensitivity as a gain (mirrors the engine's volume= on the analyser).
         let sum = 0
         for (let k = 0; k < step; k++) sum += bins[i * step + k] ?? 0
-        const v = sum / step / 255
+        const v = Math.min(1, (sum / step / 255) * gain)
         const bh = Math.max(1, v * height)
         // Intensity-based colour, mirroring the FFmpeg "intensity" palette.
         const hue = 250 - v * 250
@@ -197,7 +209,7 @@ function ReactiveVisualizer({ layer, width, height }: { layer: SceneLayer; width
     }
     raf = window.requestAnimationFrame(draw)
     return () => window.cancelAnimationFrame(raf)
-  }, [kind, width, height])
+  }, [kind, width, height, gain])
   return <canvas ref={canvasRef} width={width} height={height} style={{ width: '100%', height: '100%' }} />
 }
 
@@ -357,6 +369,8 @@ export function SceneRender({
                     startedAt={startedAt}
                     background={Boolean(l.countdown_background)}
                     backgroundStart={l.countdown_start ?? null}
+                    paused={Boolean(l.countdown_paused)}
+                    base={l.countdown_elapsed ?? 0}
                   />
                 )}
                 {l.type === 'clock' && (

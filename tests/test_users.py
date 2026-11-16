@@ -222,6 +222,40 @@ def test_update_missing_command_file_returns_manual_hint(authed, tmp_path):
     assert res.get("manual") is True
 
 
+def test_update_malformed_command_returns_hint_not_500(authed):
+    """A stray quote in the configured command must not crash the endpoint."""
+    authed.put("/api/broadcast/settings", json={"update_command": "echo 'unbalanced"})
+    r = authed.post("/api/system/update", json={})
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["ok"] is False
+    assert res.get("manual") is True
+
+
+def test_update_directory_command_returns_hint(authed, tmp_path):
+    """A non-executable path (a directory) reports a hint instead of a 500."""
+    authed.put("/api/broadcast/settings", json={"update_command": str(tmp_path)})
+    r = authed.post("/api/system/update", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is False
+
+
+def test_update_log_endpoint_reports_lines(authed):
+    """The console endpoint returns the tail of the update log (or an empty list)."""
+    from app.routers import system as system_mod
+
+    path = system_mod._update_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("ligne 1\nligne 2\nligne 3\n", encoding="utf-8")
+    data = authed.get("/api/system/update/log?lines=2").json()
+    assert data["lines"] == ["ligne 2", "ligne 3"]
+    assert data["path"] == str(path)
+
+
+def test_update_log_requires_settings_capability(installed):
+    assert installed.get("/api/system/update/log").status_code == 401
+
+
 def test_latest_published_prefers_release_then_tags(monkeypatch):
     """The update check prefers a Release, then falls back to the newest tag."""
     import app.routers.system as system

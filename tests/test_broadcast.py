@@ -6,8 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from app import config
-from app.engine import get_engine
+from app import config, db
+from app.engine import OutputConfig, PlaybackEngine, get_engine
 
 
 def _make_video(path: Path, seconds=1):
@@ -356,3 +356,114 @@ def test_schedule_does_not_touch_stopped_broadcast(authed, tmp_path):
     engine._apply_schedule_once()
     assert engine._state.playlist_id is None
 
+
+
+def test_countdown_pause_and_resume(authed):
+    """Pausing freezes the countdown; resuming restarts from where it stopped."""
+    pid, sid = _make_countdown_playlist(authed, 120)
+    item = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]
+
+    # Start it, then pause: the elapsed time is accumulated and it is frozen.
+    assert authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "start"}).status_code == 200
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "pause"})
+    assert r.status_code == 200, r.text
+    assert r.json()["paused"] is True
+    scene = authed.get(f"/api/scenes/{sid}").json()
+    assert scene["layers"][0]["countdown_paused"] is True
+    assert scene["layers"][0]["countdown_elapsed"] >= 0
+
+    # The descriptor reports the paused state so the monitor shows the ⏸ badge.
+    cd = authed.get(f"/api/broadcast/preview?playlist_id={pid}").json()["preview"]["items"][0]["countdown"]
+    assert cd["paused"] is True
+
+    # Resume clears the pause (and restarts the wall clock).
+    r = authed.post("/api/broadcast/countdown", json={"item_id": item["id"], "action": "resume"})
+    assert r.status_code == 200, r.text
+    assert r.json()["paused"] is False
+    scene = authed.get(f"/api/scenes/{sid}").json()
+    assert scene["layers"][0]["countdown_paused"] is False
+
+
+def test_countdown_paused_freezes_engine_expression(installed, tmp_path):
+    """A paused countdown draws a constant time (no `floor(t)` advance)."""
+    import json as _json
+
+    layers = [{
+        "type": "countdown", "countdown_seconds": 60, "countdown_mode": "down",
+        "countdown_background": True, "countdown_start": 1.0,
+        "countdown_elapsed": 30, "countdown_paused": True,
+    }]
+    sid = db.execute(
+        "INSERT INTO scenes(name, width, height, background, layers) VALUES(?,?,?,?,?)",
+        ("S", 320, 240, "#000", _json.dumps(layers)),
+    )
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, scene_id, position, duration) VALUES(?,?,?,?)",
+        (pid, sid, 0, 2.0),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    cmd, _ = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(tmp_path / "o.mp4"), width=320, height=240, fps=25, realtime=False)
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    # Frozen at the accumulated 30 s: the expression has no advancing tick.
+    assert "60-(30+0)" in fc
+
+
+def test_playlist_item_fade_in_out_persisted(authed):
+    """Fade in/out are stored on the item and exposed in the playlist."""
+    pid = authed.post("/api/playlists", json={"name": "Fade"}).json()["id"]
+    sid = authed.post("/api/scenes", json={"name": "S", "layers": []}).json()["id"]
+    item = authed.post(
+        f"/api/playlists/{pid}/items",
+        json={"scene_id": sid, "duration": 5, "fade_in": 1.5, "fade_out": 2.0},
+    ).json()["items"][0]
+    assert item["fade_in"] == 1.5 and item["fade_out"] == 2.0
+
+    # PATCH updates them independently.
+    authed.patch(f"/api/playlists/{pid}/items/{item['id']}", json={"fade_in": 3})
+    items = authed.get(f"/api/playlists/{pid}").json()["items"]
+    assert items[0]["fade_in"] == 3 and items[0]["fade_out"] == 2.0
+
+
+def test_fade_forces_filter_pipeline_and_adds_afade(installed, tmp_path):
+    """A fade needs decoding, so it must not use the stream-copy fast path."""
+    import subprocess as _sp
+
+    v = tmp_path / "v.mp4"
+    _sp.run(
+        [config.FFMPEG_BIN, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "testsrc=size=160x120:rate=25:duration=3",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(v)],
+        check=True, timeout=120,
+    )
+    from app import probe
+
+    info = probe.probe(v)
+    mid = db.execute(
+        """INSERT INTO media(title, filename, path, kind, size, duration, width, height, fps,
+                             video_codec, audio_codec, has_audio)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("v", "v.mp4", str(v), "video", v.stat().st_size, info["duration"], info["width"],
+         info["height"], info["fps"], info["video_codec"], info["audio_codec"], info["has_audio"]),
+    )
+    pid = db.execute("INSERT INTO playlists(name, loop) VALUES('P', 1)")
+    db.execute(
+        "INSERT INTO playlist_items(playlist_id, media_id, position, duration, fade_in, fade_out) "
+        "VALUES(?,?,?,?,?,?)",
+        (pid, mid, 0, 3.0, 1.0, 1.0),
+    )
+    engine = PlaybackEngine()
+    items = engine._resolve_items(pid)
+    assert engine._can_stream_copy(items) is False
+    cmd, pipeline = engine._build_command(
+        items, OutputConfig(kind="file", file_path=str(tmp_path / "o.mp4"), width=160, height=120, fps=25, realtime=False)
+    )
+    assert pipeline == "filter"
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "afade=t=in:st=0:d=1.000" in fc
+    assert "afade=t=out:st=2.000:d=1.000" in fc

@@ -403,7 +403,7 @@ class PlaybackEngine:
             """SELECT pi.id, pi.position, pi.duration AS override_duration,
                       pi.transition, pi.transition_duration,
                       pi.background_audio_id, pi.background_volume,
-                      pi.background_audio_continue,
+                      pi.background_audio_continue, pi.fade_in, pi.fade_out,
                       m.id AS media_id, m.title, m.path, m.kind, m.duration, m.has_audio,
                       m.width, m.height, m.fps, m.video_codec, m.audio_codec, m.thumbnail,
                       bg.path AS bg_path, bg.duration AS bg_duration, bg.title AS bg_title,
@@ -441,6 +441,8 @@ class PlaybackEngine:
             d["transition"] = d.get("transition") or "cut"
             d["transition_duration"] = float(d.get("transition_duration") or 0)
             d["background_volume"] = float(d.get("background_volume") or 0)
+            d["fade_in"] = float(d.get("fade_in") or 0)
+            d["fade_out"] = float(d.get("fade_out") or 0)
             bg_path = d.get("bg_path")
             d["background_audio_path"] = bg_path if bg_path and Path(bg_path).exists() else None
             # "Continue previous music": keep playing the track of the item above
@@ -777,6 +779,9 @@ class PlaybackEngine:
             return False
         if any(i.get("background_audio_path") for i in items):
             return False
+        # A fade needs decoding, so it forces the filter pipeline.
+        if any((i.get("fade_in") or 0) > 0 or (i.get("fade_out") or 0) > 0 for i in items):
+            return False
         first = items[0]
         for item in items:
             if item["video_codec"] != first["video_codec"]:
@@ -923,15 +928,28 @@ class PlaybackEngine:
             ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
             filters.append(f"[{ai}:a]anull[base{n}]")
 
+        # Fade in / fade out of the item's audio (seconds). The chain is appended
+        # to whichever filter produces the segment's final [a{n}] label, so no
+        # extra relabelling is needed. `afade` fades from/to silence.
+        fade_in = float(item.get("fade_in") or 0)
+        fade_out = float(item.get("fade_out") or 0)
+        fade = ""
+        if fade_in > 0:
+            fade += f",afade=t=in:st=0:d={min(fade_in, dur):.3f}"
+        if fade_out > 0:
+            fo = min(fade_out, dur)
+            fade += f",afade=t=out:st={max(0.0, dur - fo):.3f}:d={fo:.3f}"
+
         if bg:
             bgi = add_input(["-t", f"{dur:.3f}", "-i", bg])
             vol = float(item.get("background_volume") or 0.15)
             filters.append(f"[{bgi}:a]{a_norm},atrim=duration={dur:.3f},asetpts=PTS-STARTPTS,volume={vol:.3f}[bgm{n}]")
             filters.append(
-                f"[base{n}][bgm{n}]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a{n}]"
+                f"[base{n}][bgm{n}]amix=inputs=2:duration=first:dropout_transition=0:normalize=0"
+                f"{fade}[a{n}]"
             )
         else:
-            filters.append(f"[base{n}]anull[a{n}]")
+            filters.append(f"[base{n}]anull{fade}[a{n}]")
 
     def _has_transitions(self, items: list[dict[str, Any]]) -> bool:
         return any(fx.transition_name(i.get("transition") or "cut") for i in items[1:])
@@ -1094,25 +1112,29 @@ class PlaybackEngine:
             return True
 
         if ltype == "countdown":
-            # A clock counting down (or up) from `countdown_seconds`. `t` is the
-            # time since the layer went on air, so the timer starts exactly when
-            # the scene reaches the program (no need to pre-set anything).
-            # "Continue in background": when the layer carries a wall-clock start
-            # (`countdown_start`), the elapsed time is added so the timer keeps
-            # counting even while the scene is not on the program or in the
-            # preview. Formatted MM:SS for readability.
+            # A clock counting down (or up) from `countdown_seconds`. The elapsed
+            # time is `countdown_elapsed` (seconds accumulated before the last
+            # start) plus either the wall-clock time since `countdown_start`
+            # ("continue in background") or the on-air time `t` (per-scene).
+            # A paused countdown is frozen at `countdown_elapsed`.
+            # Formatted MM:SS for readability.
             total = int(layer.get("countdown_seconds") or 60)
             mode = layer.get("countdown_mode") or "down"
-            offset = 0
-            if layer.get("countdown_background") and layer.get("countdown_start"):
+            base = int(layer.get("countdown_elapsed") or 0)
+            if layer.get("countdown_paused"):
+                offset, tick = base, "0"
+            elif layer.get("countdown_background") and layer.get("countdown_start"):
                 try:
-                    offset = max(0, int(time.time() - float(layer["countdown_start"])))
+                    wall = max(0, int(time.time() - float(layer["countdown_start"])))
                 except (TypeError, ValueError):
-                    offset = 0
-            if mode == "down":
-                secs = f"max(0\\,{total}-({offset}+floor(t)))"
+                    wall = 0
+                offset, tick = base + wall, "floor(t)"
             else:
-                secs = f"{total}+{offset}+floor(t)"
+                offset, tick = base, "floor(t)"
+            if mode == "down":
+                secs = f"max(0\\,{total}-({offset}+{tick}))"
+            else:
+                secs = f"{total}+{offset}+{tick}"
             # MM:SS with zero-padding: eif supports a width field (e.g. :d:2).
             # The literal colon between the two expressions must be escaped so
             # the filter_complex parser does not treat it as an option separator.
@@ -1222,13 +1244,20 @@ class PlaybackEngine:
             audio_src = item.get("background_audio_path")
             if not audio_src and item.get("kind") == "video" and item.get("has_audio"):
                 audio_src = item.get("path")
+            # Sensitivity (0.1..5) drives the analyser's input gain so the slider
+            # actually changes how lively the visualiser is, like the image's
+            # audio-reactive scaling.
+            sens = layer.get("audio_sensitivity")
+            sens = float(sens) if isinstance(sens, (int, float)) else 1.0
+            gain = max(0.1, min(sens, 5.0))
+            eq = f",volume={gain:.3f}" if abs(gain - 1.0) > 0.01 else ""
             if audio_src:
                 ai = add_input(["-t", f"{dur:.3f}", "-i", audio_src])
             else:
                 ai = add_input(["-f", "lavfi", "-t", f"{dur:.3f}", "-i", _SILENCE])
             filters.append(
                 f"[{ai}:a]aformat=channel_layouts=stereo,atrim=duration={dur:.3f},"
-                f"asetpts=PTS-STARTPTS,{chain}[viz{n}_{layer_index}]"
+                f"asetpts=PTS-STARTPTS{eq},{chain}[viz{n}_{layer_index}]"
             )
             filters.append(f"{src}[viz{n}_{layer_index}]overlay={x}:{y}:shortest=1{out_label}")
             return True
@@ -1338,6 +1367,8 @@ def _countdown_descriptor(item: dict[str, Any]) -> dict[str, Any] | None:
                 "mode": layer.get("countdown_mode") or "down",
                 "background": bool(layer.get("countdown_background")),
                 "start": float(layer["countdown_start"]) if layer.get("countdown_start") else None,
+                "paused": bool(layer.get("countdown_paused")),
+                "elapsed": int(layer.get("countdown_elapsed") or 0),
             }
     return None
 
@@ -1360,6 +1391,8 @@ def _public_item(item: dict[str, Any]) -> dict[str, Any]:
         "background_audio_title": item.get("bg_title"),
         "background_volume": float(item.get("background_volume") or 0),
         "background_audio_continue": bool(item.get("background_audio_continue")),
+        "fade_in": float(item.get("fade_in") or 0),
+        "fade_out": float(item.get("fade_out") or 0),
         "countdown": _countdown_descriptor(item),
         "exists": bool(item.get("exists")),
     }
